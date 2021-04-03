@@ -61,10 +61,55 @@ struct RCBin(T, bool isParser) {
 
     }
 
+    /// Get a value.
+    /// Returns: the current `RCBin` instance to allow chaining
+    static if (isParser)
+    auto get(T)(ref T target) {
+
+        return getImpl(target);
+
+    }
+
+    /// Ditto
+    static if (isSerializer)
+    auto get(T)(const T input) {
+
+        // Safe cast: getImpl won't modify the clone
+        T clone = cast(T) input;
+        return getImpl(clone);
+
+    }
+
+    private auto getImpl(T)(ref T target) {
+
+        // Basic types
+        static if (isNumeric!T || isSomeChar!T) getNumber(target);
+
+        // Arrays
+        else static if (isArray!T) getArray(target);
+
+        // Other types
+        else static assert(0, "Unsupported type " ~ fullyQualifiedName!T);
+
+        return this;
+
+    }
+
+    /// Read and return a value. Should be avoided to enable making serializers.
+    static if (isParser)
+    T read(T)() {
+
+        T value;
+        get(value);
+        return value;
+
+    }
+
+
     /// Read or write a number to the stream.
     static if (isParser)
     void getNumber(T)(ref T target)
-    if (isNumeric!T) {
+    if (isNumeric!T || isSomeChar!T) {
 
         // Read the value
         target = takeExactly(*range, T.sizeof)
@@ -76,24 +121,60 @@ struct RCBin(T, bool isParser) {
 
     }
 
+    /// Ditto
     static if (isSerializer)
-    void getNumber(T)(T input)
-    if (isNumeric!T) {
+    void getNumber(T)(const T input)
+    if (isNumeric!T || isSomeChar!T) {
 
         // Write the value
         multiput(*range, input.nativeToLittleEndian[]);
 
     }
 
-    /// Get a value.
-    void get(T)(ref T target) {
+    /// Read or write a dynamic array to the stream.
+    static if (isParser)
+    void getArray(T)(ref T[] target) {
 
-        static if (isNumeric!T) getNumber(target);
+        // Make a new array in case T is const
+        Unconst!T[] clone;
+
+        // Get array length
+        clone.length = read!ulong;
+
+        // Fill each item
+        foreach (ref item; clone) {
+
+            item = read!(Unconst!T);
+
+        }
+
+        // Apply to target
+        target = cast(T[]) clone;
 
     }
 
+    /// Write a dynamic array to the stream.
+    static if (isSerializer)
+    void getArray(T)(const T[] target) {
+
+        // Write array length
+        get(cast(ulong) target.length);
+        // target.length would be uint on 32 bit machines, so we cast it to ulong
+
+        // Write each item
+        foreach (item; target) {
+
+            get(item);
+
+        }
+
+    }
+
+    // TODO: Read or write a static array to the stream.
+
 }
 
+///
 unittest {
 
     struct Foo {
@@ -102,16 +183,20 @@ unittest {
         float value;
         string name;
         string[] arguments;
+        string unicodeString;
+        int[] numbers;
 
     }
 
     void getData(T)(ref T bin, ref Foo target)
     if (isRCBin!T) {
 
-        bin.get(target.id);
-        bin.get(target.value);
-        //bin.get!string(target.name);
-        //bin.get!(string[])(target.arguments);
+        bin.get(target.id)
+           .get(target.value)
+           .get(target.name)
+           .get(target.arguments)
+           .get(target.unicodeString)
+           .get(target.numbers);
 
     }
 
@@ -120,6 +205,8 @@ unittest {
         value: 42.01,
         name: "John Doe",
         arguments: ["a", "ab", "b"],
+        unicodeString: "Ich fühle mich gut.",
+        numbers: [1, 2, 3, 4],
     };
 
     auto data = appender!(ubyte[]);
@@ -136,6 +223,25 @@ unittest {
     assert(newFoo.value == 42.01f);
     assert(newFoo.name == "John Doe");
     assert(newFoo.arguments == ["a", "ab", "b"]);
+    assert(newFoo.unicodeString == "Ich fühle mich gut.");
+    assert(newFoo.numbers == [1, 2, 3, 4]);
+
+}
+
+unittest {
+
+    char test = 'a';
+
+    auto data = appender!(ubyte[]);
+    rcbinSerializer(data)
+        .get(test);
+    auto buffer = data[];
+
+    char newTest;
+    auto parser = rcbinParser(buffer)
+        .get(newTest);
+
+    assert(newTest == 'a');
 
 }
 

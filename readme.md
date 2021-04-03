@@ -24,3 +24,4 @@ As a feature, it can do both serialization and parsing with the same code.
 ## TODOs
 
 * Make the API consistent between libraries, reuse methods for eg. struct serialization.
+* Move `JSONExclude` to a shared module and rename it to `RCExclude` or so.
