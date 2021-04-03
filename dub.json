@@ -5,14 +5,14 @@
 	"copyright": "Copyright © 2020, Soaku",
 	"description": "A collection of parsers and serializers",
 	"license": "BSL-1.0",
-	"name": "rcserial",
+	"name": "rcdata",
 	"targetType": "library",
 	"targetPath": "build",
 	"subPackages": [
 		{
 			"name": "json",
 			"sourcePaths": [],
-			"sourceFiles": ["source/rcserial/json.d"],
+			"sourceFiles": ["source/rcdata/json.d"],
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"
@@ -22,7 +22,7 @@
 		{
 			"name": "bin",
 			"sourcePaths": [],
-			"sourceFiles": ["source/rcserial/bin.d"],
+			"sourceFiles": ["source/rcdata/bin.d"],
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"

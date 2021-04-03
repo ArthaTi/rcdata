@@ -1,5 +1,5 @@
 /// A simple JSON pull parser written according to RFC 8259.
-module rcserial.json;
+module rcdata.json;
 
 import std.range;
 import std.traits;

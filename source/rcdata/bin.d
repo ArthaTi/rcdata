@@ -1,6 +1,6 @@
-/// a serializer and pull parser for a custom binary format. The format is meant to be simple, so it might lack
+/// A serializer and pull parser for a custom binary format. The format is meant to be simple, so it might lack
 /// features. It does not store field names or type information.
-module rcserial.bin;
+module rcdata.bin;
 
 import std.range;
 import std.traits;
