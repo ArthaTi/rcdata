@@ -1,3 +1,4 @@
+/// A simple JSON pull parser written according to RFC 8259.
 module rcserial.json;
 
 import std.range;
