@@ -88,6 +88,9 @@ struct RCBin(T, bool isParser) {
         // Arrays
         else static if (isArray!T) getArray(target);
 
+        // Structs
+        else static if (is(T == struct)) getStruct(target);
+
         // Other types
         else static assert(0, "Unsupported type " ~ fullyQualifiedName!T);
 
@@ -155,14 +158,14 @@ struct RCBin(T, bool isParser) {
 
     /// Write a dynamic array to the stream.
     static if (isSerializer)
-    void getArray(T)(const T[] target) {
+    void getArray(T)(const T[] input) {
 
         // Write array length
-        get(cast(ulong) target.length);
+        get(cast(ulong) input.length);
         // target.length would be uint on 32 bit machines, so we cast it to ulong
 
         // Write each item
-        foreach (item; target) {
+        foreach (item; input) {
 
             get(item);
 
@@ -171,6 +174,34 @@ struct RCBin(T, bool isParser) {
     }
 
     // TODO: Read or write a static array to the stream.
+
+    /// Read or write all struct fields.
+    static if (isParser)
+    void getStruct(T)(ref T target)
+    if (is(T == struct)) {
+
+        // Iterate on each field
+        static foreach (fieldName; FieldNameTuple!T) {
+
+            get(mixin("target." ~ fieldName));
+
+        }
+
+    }
+
+    /// Ditto.
+    static if (isSerializer)
+    void getStruct(T)(const T target)
+    if (is(T == struct)) {
+
+        // Iterate on each field
+        static foreach (fieldName; FieldNameTuple!T) {
+
+            get(mixin("target." ~ fieldName));
+
+        }
+
+    }
 
 }
 
@@ -209,12 +240,13 @@ unittest {
         numbers: [1, 2, 3, 4],
     };
 
+    // Serialize the data
     auto data = appender!(ubyte[]);
     auto serializer = rcbinSerializer(data);
     getData(serializer, foo);
 
+    // Read the data
     ubyte[] buffer = data[];
-
     Foo newFoo;
     auto parser = rcbinParser(buffer);
     getData(parser, newFoo);
@@ -225,6 +257,21 @@ unittest {
     assert(newFoo.arguments == ["a", "ab", "b"]);
     assert(newFoo.unicodeString == "Ich fühle mich gut.");
     assert(newFoo.numbers == [1, 2, 3, 4]);
+
+    // Or even better — serialize the whole struct
+    auto data2 = appender!(ubyte[]);
+    rcbinSerializer(data2)
+        .getStruct(foo);
+
+    auto buffer2 = data2[];
+    assert(data[] == buffer2);
+
+    // And read the data later
+    Foo anotherFoo;
+    rcbinParser(buffer2)
+        .getStruct(anotherFoo);
+
+    assert(foo == anotherFoo);
 
 }
 
