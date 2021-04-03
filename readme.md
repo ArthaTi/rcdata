@@ -1,10 +1,10 @@
-# rcserial
+# rcdata
 
-rcserial is a small collection of parsers and serializers.
+rcdata is a small collection of parsers and serializers.
 
-## rcjson
+## json
 
-rcjson is a simple JSON pull parser written according to [RFC](https://tools.ietf.org/html/rfc8259).
+rcdata.json is a simple JSON pull parser written according to [RFC](https://tools.ietf.org/html/rfc8259).
 
 ## Why another?
 

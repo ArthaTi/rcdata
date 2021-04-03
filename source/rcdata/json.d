@@ -1,4 +1,4 @@
-module rcserial.json;
+module rcdata.json;
 
 import std.range;
 import std.traits;
