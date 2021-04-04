@@ -156,7 +156,7 @@ struct RCBin(T, bool isParser) {
 
     }
 
-    /// Write a dynamic array to the stream.
+    /// Ditto
     static if (isSerializer)
     void getArray(T)(const T[] input) {
 
@@ -173,7 +173,33 @@ struct RCBin(T, bool isParser) {
 
     }
 
-    // TODO: Read or write a static array to the stream.
+    /// Read or write a static array to the stream.
+    static if (isParser)
+    void getArray(T, size_t size)(ref T[size] target) {
+
+        // TODO const(T) support? if that works for static arrays...
+
+        foreach (ref item; target) {
+
+            item = read!T;
+
+        }
+
+    }
+
+    /// Ditto
+    static if (isSerializer)
+    void getArray(T, size_t size)(const T[size] input) {
+
+        // TODO const(T) support? if that works for static arrays...
+
+        foreach (item; input) {
+
+            get(item);
+
+        }
+
+    }
 
     /// Read or write all struct fields.
     static if (isParser)
@@ -189,7 +215,7 @@ struct RCBin(T, bool isParser) {
 
     }
 
-    /// Ditto.
+    /// Ditto
     static if (isSerializer)
     void getStruct(T)(const T target)
     if (is(T == struct)) {
@@ -216,6 +242,7 @@ unittest {
         string[] arguments;
         string unicodeString;
         int[] numbers;
+        int[3] staticArray;
 
     }
 
@@ -227,7 +254,8 @@ unittest {
            .get(target.name)
            .get(target.arguments)
            .get(target.unicodeString)
-           .get(target.numbers);
+           .get(target.numbers)
+           .get(target.staticArray);
 
     }
 
@@ -238,6 +266,7 @@ unittest {
         arguments: ["a", "ab", "b"],
         unicodeString: "Ich fühle mich gut.",
         numbers: [1, 2, 3, 4],
+        staticArray: [1, 2, 3],
     };
 
     // Serialize the data
@@ -257,6 +286,7 @@ unittest {
     assert(newFoo.arguments == ["a", "ab", "b"]);
     assert(newFoo.unicodeString == "Ich fühle mich gut.");
     assert(newFoo.numbers == [1, 2, 3, 4]);
+    assert(newFoo.staticArray == [1, 2, 3]);
 
     // Or even better — serialize the whole struct
     auto data2 = appender!(ubyte[]);
