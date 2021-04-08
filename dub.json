@@ -17,5 +17,15 @@
 			"targetType": "library",
 			"targetPath": "build"
 		}
+	],
+	"subPackages": [
+		{
+			"name": "bin",
+			"sourcePaths": [],
+			"sourceFiles": ["source/rcdata/bin.d"],
+			"importPaths": ["source"],
+			"targetType": "library",
+			"targetPath": "build"
+		}
 	]
 }
