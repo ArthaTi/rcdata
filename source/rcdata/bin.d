@@ -82,8 +82,11 @@ struct RCBin(T, bool isParser) {
 
     private auto getImpl(T)(ref T target) {
 
+        // Boolean
+        static if (is(T == bool)) getBoolean(target);
+
         // Basic types
-        static if (isNumeric!T || isSomeChar!T) getNumber(target);
+        else static if (isNumeric!T || isSomeChar!T) getNumber(target);
 
         // Arrays
         else static if (isArray!T) getArray(target);
@@ -105,6 +108,16 @@ struct RCBin(T, bool isParser) {
         T value;
         get(value);
         return value;
+
+    }
+
+    /// Read or write a boolean to the stream.
+    void getBoolean(ref bool target) {
+
+        // Read the value
+        ubyte tempTarget = target;
+        getNumber(tempTarget);
+        target = cast(bool) tempTarget;
 
     }
 
@@ -319,6 +332,25 @@ unittest {
         .get(newTest);
 
     assert(newTest == 'a');
+
+}
+
+unittest {
+
+    auto data = appender!(ubyte[]);
+    rcbinSerializer(data)
+        .get(true)
+        .get(false);
+
+    auto buffer = data[];
+
+    bool foo, bar;
+    auto parser = rcbinParser(buffer)
+        .get(foo)
+        .get(bar);
+
+    assert(foo);
+    assert(!bar);
 
 }
 
