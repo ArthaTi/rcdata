@@ -7,8 +7,8 @@ import std.traits;
 import std.bitmanip;
 
 // Implementation notes:
-// * Use `ulong` instead of `size_t` to keep the data consistent between computers.
-// * Numbers should be stored in little ending using std.bitmanip.nativeToLittleEndian.
+// * Use `ulong` instead of `size_t` to keep the data consistent between devices.
+// * Numbers should be stored in little endian using std.bitmanip.nativeToLittleEndian.
 
 /// Make an rcbin parser.
 RCBin!(T, true) rcbinParser(T)(ref T range) {
@@ -155,7 +155,7 @@ struct RCBin(T, bool isParser) {
         Unconst!T[] clone;
 
         // Get array length
-        clone.length = read!ulong;
+        clone.length = cast(size_t) read!ulong;
 
         // Fill each item
         foreach (ref item; clone) {
@@ -351,6 +351,7 @@ unittest {
 
     assert(foo);
     assert(!bar);
+    assert(buffer.length == 0);
 
 }
 
