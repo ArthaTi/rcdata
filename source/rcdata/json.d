@@ -47,7 +47,7 @@ struct JSONParser {
         // Nothing left
         if (input.empty) {
 
-            throw new Exception("Unexpected end of file.");
+            throw new JSONException("Unexpected end of file.");
 
         }
 
@@ -74,14 +74,14 @@ struct JSONParser {
             case ']':
             case '}':
 
-                throw new Exception(
+                throw new JSONException(
                     failMsg(input.front.format!"Unexpected '%s' (maybe there's a comma before it?)")
                 );
 
             // Other errors
             default:
 
-                throw new Exception(
+                throw new JSONException(
                     failMsg(input.front.format!"Unexpected character '%s'")
                 );
 
