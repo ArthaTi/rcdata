@@ -563,10 +563,13 @@ struct JSONParser {
     ///
     /// The object doesn't have to contain all fields defined in the struct or class.
     ///
-    /// Fields that share names with D reserved keywords can be suffixed with `_`, as according to the
-    /// $(LINK2 https://dlang.org/dstyle.html#naming_keywords, D style).
+    /// JSON fields that share names with D reserved keywords can be suffixed with `_` in code, per the
+    /// $(LINK2 https://dlang.org/dstyle.html#naming_keywords, D style specification).
     ///
-    /// The struct or class must have a no argument constructor available.
+    /// For `getStruct`, the struct or class must have a default constructor available.
+    ///
+    /// Inaccessible (eg. private or protected in external access) fields and fields marked with `@JSONExclude` will not
+    /// be affected.
     ///
     /// Throws: `JSONException` if there's a type mismatch or syntax error.
     /// Params:
@@ -601,8 +604,11 @@ struct JSONParser {
 
                 static foreach (i, field; staticMap!(FieldNameTuple, FullT)) {{
 
+                    enum compatible = __traits(compiles, mixin("T." ~ field))
+                        && !hasUDA!(mixin("T." ~ field), JSONExclude);
+
                     alias FieldType = FieldTypes[i];
-                    static if (!hasUDA!(mixin("T." ~ field), JSONExclude)) {
+                    static if (compatible) {
 
                         case field.chomp("_"):
 
