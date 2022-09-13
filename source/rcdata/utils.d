@@ -5,6 +5,7 @@ import std.stdio;
 import std.range;
 import std.string;
 import std.algorithm;
+import std.exception;
 
 /// Write a hexdump for debugging. Writes to stdout.
 void hexDump(ubyte[] bytes, int perLine = 16) {
@@ -26,5 +27,24 @@ void hexDump(File file, ubyte[] bytes, int perLine = 16) {
         file.writefln!"%(%c%)"(value.map!(a => a.isGraphical ? cast(char) a : '.'));
 
     }
+
+}
+
+/// Stringof improved to better handle callbacks
+template stringofEx(alias foo) {
+
+    import std.traits;
+
+    static if (isCallable!foo)
+        enum stringofEx = (&foo).stringof;
+    else
+        enum stringofEx = foo.stringof;
+
+}
+
+/// Base type for all rcdata exceptions.
+abstract class RCDataException : Exception {
+
+    mixin basicExceptionCtors;
 
 }

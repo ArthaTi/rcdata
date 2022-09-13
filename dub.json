@@ -1,13 +1,19 @@
 {
 	"authors": [
-		"Soaku"
+		"Artha"
 	],
-	"copyright": "Copyright © 2020, Soaku",
+	"copyright": "Copyright © 2020, Artha",
 	"description": "A collection of parsers and serializers",
 	"license": "BSL-1.0",
 	"name": "rcdata",
 	"targetType": "library",
 	"targetPath": "build",
+	"buildTypes": {
+		"unittest": {
+			"sourcePaths": ["source", "tests"],
+			"buildOptions": ["unittests", "debugMode", "debugInfo"]
+		}
+	},
 	"subPackages": [
 		{
 			"name": "json",
@@ -16,13 +22,19 @@
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"
-		}
-	],
-	"subPackages": [
+		},
 		{
 			"name": "bin",
 			"sourcePaths": [],
 			"sourceFiles": ["source/rcdata/bin.d"],
+			"importPaths": ["source"],
+			"targetType": "library",
+			"targetPath": "build"
+		},
+		{
+			"name": "parser",
+			"sourcePaths": [],
+			"sourceFiles": ["source/rcdata/parser.d"],
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"

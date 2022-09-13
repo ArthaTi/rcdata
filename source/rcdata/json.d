@@ -7,6 +7,8 @@ import std.format;
 import std.algorithm;
 import std.exception;
 
+import rcdata.utils;
+
 /// Struct for parsing JSON.
 struct JSONParser {
 
@@ -1297,7 +1299,7 @@ unittest {
 }
 
 /// Thrown if JSON parsing fails.
-class JSONException : Exception {
+class JSONException : RCDataException {
 
     mixin basicExceptionCtors;
 
