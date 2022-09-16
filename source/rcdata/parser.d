@@ -3,6 +3,7 @@
 /// Can be used for both lexing and parsing grammars.
 module rcdata.parser;
 
+import std.range;
 import std.traits;
 import std.exception;
 
@@ -44,7 +45,7 @@ if (isParserResult!T) {
 }
 
 mixin template makeParser(Input, alias consume)
-if (isSomeString!Input) {
+if (is(ElementType!Input : dchar)) {
 
     mixin makeParser!(Input, consume, matchText);
 
@@ -58,7 +59,7 @@ if (isSomeString!Input) {
         // Match EOF
         static if (text.length == 0) {
 
-            enforceX(input.length == 0, format!"Expected end of file", input);
+            enforceX(input.empty, format!"Expected end of file", input);
 
         }
 
@@ -101,45 +102,20 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         if (!condition) {
 
-            throw new ParserException(msg, input);
+            throw new ParserMatchException(msg, input);
 
         }
 
     }
 
-    class ParserException : RCDataException {
-
-        Output context;
-        Input source;
-
-        this(string msg, Input source, string filename = __FILE__, size_t line = __LINE__) pure @safe {
-
-            super(msg, filename, line);
-            this.source = source;
-
-        }
-
-        this(string msg, Output context, Input source, string filename = __FILE__, size_t line = __LINE__) pure @safe {
-
-            this(msg, source, filename, line);
-            this.context = context;
-
-        }
-
-        /// Extend the exception with data about the parent context.
-        typeof(this) extend()(Output context) {
-
-            this.context = consume(context, this.context);
-            return this;
-
-        }
-
-    }
+    alias ParserException = rcdata.parser.ParserExceptionImpl!(Input, consume);
+    alias ParserMatchException = rcdata.parser.ParserMatchExceptionImpl!(Input, consume);
+    alias ParserCriticalException = rcdata.parser.ParserCriticalExceptionImpl!(Input, consume);
 
     /// Remove content of this parser result and merge it into a single one.
     Output dropContent()(Output tokens) {
 
-        return [OutputItem.make(tokens.consumed, Input.init)];
+        return consume(tokens.consumed, Input.init);
 
     }
 
@@ -191,23 +167,21 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
                 local = fun(context);
 
-                static assert(is(typeof(local) : Output),
-                    fun.stringof ~ " return type "
-                    ~ typeof(local).stringof ~ " doesn't match "
-                    ~ Output.stringof);
-
             }
 
             // It's not callable. But maybe basicMatcher can handle it?
-            else {
+            else static if (__traits(compiles, local = basicMatcher!fun(context))) {
 
                 // Alias to basicMatcher
                 local = basicMatcher!fun(context);
 
-                static assert(is(typeof(local) : Output),
-                    basicMatcher.stringof ~ " return type "
-                    ~ typeof(local).stringof ~ " doesn't match "
-                    ~ Output.stringof);
+            }
+
+            // Try both to see what the errors are
+            else {
+
+                local = fun(context);
+                local = basicMatcher!fun(context);
 
             }
 
@@ -244,11 +218,11 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
             try return match!fun(input);
 
             // Failed parsing? That's ok, we'll try the next
-            catch (ParserException) { }
+            catch (ParserMatchException) { }
 
         }
 
-        throw new ParserException(format!"None of the tokens matched: %s"(funs.stringof), input);
+        throw new ParserMatchException(format!"None of the tokens matched: %s"(funs.stringof), input);
 
     }
 
@@ -280,7 +254,7 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
             try local = match!funs(input);
 
             // Stop if complete
-            catch (ParserException) break;
+            catch (ParserMatchException) break;
 
             // Check the length
             const length = local.consumed;
@@ -300,7 +274,7 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
         // Didn't match enough
         if (matches < minMatches) {
 
-            throw new ParserException(
+            throw new ParserMatchException(
                 format!"matchRepeatMin matched %s times, expected %s"(matches, minMatches),
                 result, input,
             );
@@ -336,7 +310,7 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
             }
 
             // Proceed like normal if not matched
-            catch (ParserException) { }
+            catch (ParserMatchException) { }
 
 
             // Match the token
@@ -372,28 +346,73 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
         try return match!funs(input);
 
         // Ignore failures
-        catch (ParserException) { }
+        catch (ParserMatchException) { }
 
         return consume(0, Input.init);
 
     }
 
     /// Require the given rule to match, otherwise throw given exception.
-    Output matchCritical(Exc : Throwable, funs...)(Input input) {
+    ///
+    /// Considers rules as "failing" if they throw `ParserMatchException`.
+    ///
+    /// Params:
+    ///     Exc = Exception type to instantiate and throw. Will be passed a message string and, if supported, input
+    ///         range of the following source text. If omitted, but `message` is given, throws
+    ///         `ParserCriticalException`.
+    ///     message = Message of the exception to throw.
+    ///     instance = Already constructed instance of an exception to throw.
+    ///     funs = Pattern to match.
+    Output matchCritical(Exc : Throwable, string message, funs...)(Input input) {
 
-        return matchCritical!(new Exc("matchCritical failure!"), funs)(input);
+        // Exception accepting source data
+        static if (__traits(compiles, new Exc(message, input))) {
+
+            return matchCriticalImpl!funs(input, new Exc(message, input));
+
+        }
+
+        // Regular exception
+        else return matchCriticalImpl!funs(input, new Exc(message));
 
     }
 
+    /// ditto
+    Output matchCritical(string message, funs...)(Input input) {
+
+        return matchCritical!(ParserCriticalException, message, funs)(input);
+
+    }
+
+    /// ditto
     Output matchCritical(Throwable instance, funs...)(Input input) {
+
+        return matchCriticalImpl!funs(input, instance);
+
+    }
+
+    /// ditto
+    Output matchCriticalImpl(funs...)(Input input, Throwable instance) {
+
+        // Try to match
+        try return match!funs(input);
+
+        // Failed parsing, throw the chosen exception
+        catch (ParserMatchException) throw instance;
+
+    }
+
+    /// Adjust the `ParserMatchException` message thrown if the match fails.
+    Output matchFailMessage(string message, funs...)(Input input) {
 
         // Try to match
         try return match!funs(input);
 
         // Failed parsing
-        catch (ParserException) {
+        catch (ParserMatchException exc) {
 
-            throw instance;
+            exc.msg = message;
+            throw exc;
 
         }
 
@@ -403,27 +422,94 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
     Output lookAhead(funs...)(Input input) {
 
         match!funs(input);
-        return [];
+        return consume(0, Input.init);
 
     }
 
-    /// Fail if the pattern matches. Do not consume anything.
+    /// Fail if the pattern matches. Succeeds if the rule throws a `ParserMatchException`. Doesn't consume anything.
     Output failAhead(funs...)(Input input) {
 
         try cast(void) match!funs(input);
 
         // Failed as expected, good
-        catch (ParserException) return [];
+        catch (ParserMatchException) return consume(0, Input.init);
 
-        throw new ParserException(format!"Unexpected %s"(funs.stringof), input);
+        throw new ParserMatchException(format!"Unexpected %s"(funs.stringof), input);
 
     }
 
     /// Never matches.
     Output matchNever(string msg)(Input input) pure @safe {
 
-        throw new ParserException(msg, input);
+        throw new ParserMatchException(msg, input);
 
     }
+
+}
+
+/// Exception type thrown on any parser failure.
+abstract class ParserExceptionImpl(Input, alias consume) : RCDataException {
+
+    import std.range;
+
+    static assert(isInputRange!Input, Input.stringof ~ " isn't an input range");
+
+    alias Output = ConsumerResult!(consume, Input);
+
+    Output context;
+    Input source;
+
+    this(string msg, Input source, string filename = __FILE__, size_t line = __LINE__) pure @safe {
+
+        super(msg, filename, line);
+        this.source = source;
+
+    }
+
+    this(string msg, Output context, Input source, string filename = __FILE__, size_t line = __LINE__) pure @safe {
+
+        this(msg, source, filename, line);
+        this.context = context;
+
+    }
+
+    mixin template parserExeptionCtors() {
+
+        this(string msg, Input source, string filename = __FILE__, size_t line = __LINE__) pure @safe {
+
+            super(msg, source, filename, line);
+
+        }
+
+        this(string msg, Output context, Input source, string filename = __FILE__, size_t line = __LINE__)
+            pure @safe
+        do {
+            super(msg, context, source, filename, line);
+        }
+
+    }
+
+    /// Extend the exception with data about the parent context.
+    typeof(this) extend()(Output context) {
+
+        this.context = consume(context, this.context);
+        return this;
+
+    }
+
+}
+
+/// Recoverable exception thrown when the parser failed to match a rule.
+class ParserMatchExceptionImpl(Input, alias consume) : ParserExceptionImpl!(Input, consume) {
+
+    mixin parserExeptionCtors;
+
+}
+
+/// Exception thrown when the parser fails to match a critical rule. The parser should stop processing once thrown,
+/// although catches done to `extend` exceptions with additional context are still allowed.
+class ParserCriticalExceptionImpl(Input, alias consume) : ParserExceptionImpl!(Input, consume) {
+
+    mixin parserExeptionCtors;
 
 }
