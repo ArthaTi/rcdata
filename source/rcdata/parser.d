@@ -112,20 +112,6 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
     alias ParserMatchException = rcdata.parser.ParserMatchExceptionImpl!(Input, consume);
     alias ParserCriticalException = rcdata.parser.ParserCriticalExceptionImpl!(Input, consume);
 
-    /// Remove content of this parser result and merge it into a single one.
-    Output dropContent()(Output tokens) {
-
-        return consume(tokens.consumed, Input.init);
-
-    }
-
-    /// Match given rules but drop their content.
-    Output matchDrop(funs...)(Input input) {
-
-        return dropContent(match!funs(input));
-
-    }
-
 
     /// Match anything.
     Output matchAny()(Input input) {
