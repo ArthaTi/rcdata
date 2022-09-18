@@ -51,6 +51,7 @@ if (is(ElementType!Input : dchar)) {
 
     static auto matchText(dstring text)(Input input) {
 
+        import std.range;
         import std.string;
         import std.exception;
 
@@ -74,6 +75,12 @@ if (is(ElementType!Input : dchar)) {
 }
 
 /// Mixin to produce matcher templates for processing `Input` input range and creating an `Output` output range.
+///
+/// The mixin can work both in module scope and at `struct`/`class` scope. No context is required for the matcher
+/// functions to work.
+///
+/// Please note that internally the template only defines aliases to closures rather than functions. This allows them to
+/// work without an instance in structs and classes, but still allow for context in template parameters.
 mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
     import std.format;
@@ -112,17 +119,14 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
     alias ParserMatchException = rcdata.parser.ParserMatchExceptionImpl!(Input, consume);
     alias ParserCriticalException = rcdata.parser.ParserCriticalExceptionImpl!(Input, consume);
 
-
     /// Match anything.
-    Output matchAny()(Input input) {
+    alias matchAny() = (Input input)
 
-        return matchAny!((InputItem item) => true)(input);
-
-    }
+        => matchAny!((InputItem item) => true)(input);
 
 
     /// Match one single item if `fun` returns `true`.
-    Output matchAny(alias fun)(Input input) {
+    alias matchAny(alias fun) = (Input input) {
 
         alias funCC = unaryFun!fun;
 
@@ -135,10 +139,10 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         return consume(1, input.take(1));
 
-    }
+    };
 
     /// Match a sequence of tokens.
-    Output match(funs...)(Input input) {
+    alias match(funs...) = (Input input) {
 
         Output result;
         Input context = input;
@@ -191,11 +195,11 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         return result;
 
-    }
+    };
 
 
     /// Match one of the given tokens.
-    Output matchOr(funs...)(Input input) {
+    alias matchOr(funs...) = (Input input) {
 
         // Evaluate each matcher
         foreach (fun; funs) {
@@ -210,123 +214,142 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         throw new ParserMatchException(format!"None of the tokens matched: %s"(funs.stringof), input);
 
-    }
+    };
 
     /// Repeat the token sequence (as in `match`) zero to infinity times
-    Output matchRepeat(funs...)(Input input) {
+    alias matchRepeat(funs...) = (Input input)
 
-        return matchRepeatMin!(0, funs)(input);
+        => matchRepeatMin!(0, funs)(input);
 
-    }
 
     /// Repeat the token sequence at least once.
-    Output matchRepeatMinOnce(funs...)(Input input) {
+    alias matchRepeatMinOnce(funs...) = (Input input)
 
-        return matchRepeatMin!(1, funs)(input);
-
-    }
-
-    /// Repeat the token sequence (as in match) `minMatches` to infinity times
-    Output matchRepeatMin(size_t minMatches, funs...)(Input input) {
-
-        Output result;
-        size_t matches;
-
-        while (true) {
-
-            Output local;
-
-            // Match the token
-            try local = match!funs(input);
-
-            // Stop if complete
-            catch (ParserMatchException) break;
-
-            // Check the length
-            const length = local.consumed;
-
-            // Add the result
-            matches++;
-            result = consume(result, local);
-
-            // Advance the input
-            input.popFrontN(length);
-
-            // Special case: Match is empty, stop to prevent loops
-            if (length == 0) break;
-
-        }
-
-        // Didn't match enough
-        if (matches < minMatches) {
-
-            throw new ParserMatchException(
-                format!"matchRepeatMin matched %s times, expected %s"(matches, minMatches),
-                result, input,
-            );
-
-        }
-
-        return result;
-
-    }
+        => matchRepeatMin!(1, funs)(input);
 
 
-    /// Match anything until the given token. Does NOT match the terminator.
-    Output matchUntil(alias terminator)(Input input) {
+    alias matchRepeatMin(size_t minMatches, funs...) = (Input input)
 
-        return matchUntil!(terminator, matchAny!())(input);
+        => matchRepeatRange!funs(input, minMatches);
 
-    }
 
-    /// Repeat the sequence until another token matches. Does NOT match the terminator.
-    Output matchUntil(alias terminator, funs...)(Input input)
-    if (funs.length != 0) {
+    /// Repeat the token sequence (as in match) `minMatches` to `maxMatches` times
+    alias matchRepeatRange(size_t minMatches, size_t maxMatches, funs...) = (Input input)
 
-        Output result;
+        => matchRepeatRange!funs(input, minMatches, maxMatches);
 
-        try while (true) {
 
-            // Match the terminator
-            try {
+    /// ditto
+    template matchRepeatRange(funs...)
+    if (!is(typeof(funs[0]) : size_t)) {
 
-                match!terminator(input);
-                break;
+        alias matchRepeatRange = (Input input, size_t minMatches, size_t maxMatches = size_t.max) {
+
+            Output result;
+            size_t matches;
+
+            while (true) {
+
+                Output local;
+
+                // Match the token
+                try local = match!funs(input);
+
+                // Stop if complete
+                catch (ParserMatchException) break;
+
+                // Check the length
+                const length = local.consumed;
+
+                // Add the result
+                matches++;
+                result = consume(result, local);
+
+                // Advance the input
+                input.popFrontN(length);
+
+                // Special case: Match is empty, stop to prevent loops
+                if (length == 0) break;
+
+                // Stop if matched enough
+                if (matches == maxMatches) break;
 
             }
 
-            // Proceed like normal if not matched
-            catch (ParserMatchException) { }
+            // Didn't match enough
+            if (matches < minMatches) {
+
+                throw new ParserMatchException(
+                    format!"matchRepeatMin matched %s times, expected %s"(matches, minMatches),
+                    result, input,
+                );
+
+            }
+
+            return result;
+
+        };
+
+    }
+
+    /// Match anything until the given token. Does NOT match the terminator.
+    alias matchUntil(alias terminator) = (Input input)
+
+        => matchUntil!(terminator, matchAny!())(input);
 
 
-            // Match the token
-            const local = match!funs(input);
+    /// Repeat the sequence until another token matches. Does NOT match the terminator.
+    template matchUntil(alias terminator, funs...)
+    if (funs.length != 0) {
 
-            // Check the length
-            const length = local.consumed;
+        alias matchUntil = (Input input) {
 
-            // Add the result
-            result = consume(result, local);
-            input.popFrontN(length);
+            Output result;
 
-            // Special case: Match is empty, stop to prevent loops
-            if (length == 0) break;
+            try while (true) {
 
-        }
+                // Match the terminator
+                try {
 
-        // Failed, try to add context
-        catch (ParserException exc) {
+                    match!terminator(input);
+                    break;
 
-            throw exc.extend(result);
+                }
 
-        }
+                // Proceed like normal if not matched
+                catch (ParserMatchException) { }
 
-        return result;
+
+                // Match the token
+                const local = match!funs(input);
+
+                // Check the length
+                const length = local.consumed;
+
+                // Add the result
+                result = consume(result, local);
+                input.popFrontN(length);
+
+                // Special case: Match is empty, stop to prevent loops
+                if (length == 0) break;
+
+            }
+
+            // Failed, try to add context
+            catch (ParserException exc) {
+
+                throw exc.extend(result);
+
+            }
+
+            return result;
+
+        };
 
     }
 
     /// Match zero or one instances of a token.
-    Output matchOptional(funs...)(Input input) {
+    alias matchOptional(funs...) = (Input input) {
 
         // Match the token
         try return match!funs(input);
@@ -336,7 +359,7 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         return consume(0, Input.init);
 
-    }
+    };
 
     /// Require the given rule to match, otherwise throw given exception.
     ///
@@ -348,8 +371,8 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
     ///         `ParserCriticalException`.
     ///     message = Message of the exception to throw.
     ///     instance = Already constructed instance of an exception to throw.
-    ///     funs = Pattern to match.
-    Output matchCritical(Exc : Throwable, string message, funs...)(Input input) {
+    ///     funs = Pattern to match. If empty, any pattern will count as failed.
+    alias matchCritical(Exc : Throwable, string message, funs...) = (Input input) {
 
         // Exception accepting source data
         static if (__traits(compiles, new Exc(message, input))) {
@@ -361,35 +384,48 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
         // Regular exception
         else return matchCriticalImpl!funs(input, new Exc(message));
 
-    }
+    };
 
     /// ditto
-    Output matchCritical(string message, funs...)(Input input) {
+    alias matchCritical(string message, funs...) = (Input input)
 
-        return matchCritical!(ParserCriticalException, message, funs)(input);
+        => matchCritical!(ParserCriticalException, message, funs)(input);
 
-    }
-
-    /// ditto
-    Output matchCritical(Throwable instance, funs...)(Input input) {
-
-        return matchCriticalImpl!funs(input, instance);
-
-    }
 
     /// ditto
-    Output matchCriticalImpl(funs...)(Input input, Throwable instance) {
+    alias matchCritical(Throwable instance, funs...) = (Input input)
 
-        // Try to match
-        try return match!funs(input);
+        => matchCriticalImpl!funs(input, instance);
 
-        // Failed parsing, throw the chosen exception
-        catch (ParserMatchException) throw instance;
 
-    }
+    /// ditto
+    alias matchCriticalImpl(funs...) = (Input input, Throwable instance) {
+
+        // If there's a sequence to check
+        static if (funs.length) {
+
+            // Try to match
+            try return match!funs(input);
+
+            // Failed parsing, throw the chosen exception
+            catch (ParserMatchException) throw instance;
+
+        }
+
+        // Just throw on encounter
+        else {
+
+            // Let the compiler infer the return type
+            if (false) return match!funs(input);
+
+            throw instance;
+
+        }
+
+    };
 
     /// Adjust the `ParserMatchException` message thrown if the match fails.
-    Output matchFailMessage(string message, funs...)(Input input) {
+    alias matchFailMessage(string message, funs...) = (Input input) {
 
         // Try to match
         try return match!funs(input);
@@ -402,18 +438,18 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         }
 
-    }
+    };
 
     /// Check if the pattern matches, but do not consume it.
-    Output lookAhead(funs...)(Input input) {
+    alias lookAhead(funs...) = (Input input) {
 
         match!funs(input);
         return consume(0, Input.init);
 
-    }
+    };
 
     /// Fail if the pattern matches. Succeeds if the rule throws a `ParserMatchException`. Doesn't consume anything.
-    Output failAhead(funs...)(Input input) {
+    alias failAhead(funs...) = (Input input) {
 
         try cast(void) match!funs(input);
 
@@ -422,14 +458,14 @@ mixin template makeParser(Input, alias consume, alias basicMatcher) {
 
         throw new ParserMatchException(format!"Unexpected %s"(funs.stringof), input);
 
-    }
+    };
 
     /// Never matches.
-    Output matchNever(string msg)(Input input) pure @safe {
+    alias matchNever(string msg) = (Input input) pure @safe {
 
         throw new ParserMatchException(msg, input);
 
-    }
+    };
 
 }
 

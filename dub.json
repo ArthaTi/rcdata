@@ -11,6 +11,7 @@
 	"buildTypes": {
 		"unittest": {
 			"sourcePaths": ["source", "tests"],
+			"includePaths": ["source", "tests"],
 			"buildOptions": ["unittests", "debugMode", "debugInfo"]
 		}
 	},
