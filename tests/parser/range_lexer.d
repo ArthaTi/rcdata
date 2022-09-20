@@ -1,90 +1,50 @@
 /// Test to cover usage of input and output ranges for rcdata.parser
-version (unittest) private pure @safe:
+version (unittest):
 
 import std.conv;
 import std.array;
 import std.range;
 import std.algorithm;
 
+import parser.base;
 import rcdata.parser;
 
-alias MyAppender = Appender!(Token[]);
 
-enum TokenType {
+alias TokenList = Appender!(Token[]);
 
-    none, keyword, identifier, number, whitespace, eol
-
-}
-
-struct Token {
-
-    size_t consumed;
-    dstring content;
-    TokenType type;
-
-}
-
-struct TokenList {
-
-    size_t consumed;
-    MyAppender tokens;
-
-    dstring text() const pure {
-
-        return tokens[].map!"a.content.dtext".join;
-
-    }
-
-}
 
 // Create the parser
-mixin makeParser!(SourceRange, consume, matchText);
+mixin makeParser!(SourceRange, consume);
 
-TokenList consume(size_t consumed, Take!SourceRange input) {
+TokenList consume(Take!SourceRange input) pure @safe {
 
-    return TokenList(consumed, MyAppender([Token(consumed, input.to!dstring)]));
+    return TokenList([
+        Token(TokenType.none, input.to!string)
+    ]);
 
 }
 
-TokenList consume(TokenList listA, TokenList listB) {
+TokenList consume(TokenList listA, TokenList listB) pure @safe {
 
-    put(listA.tokens, listB.tokens[]);
+    put(listA, listB[]);
 
-    return TokenList(
-        listA.consumed + listB.consumed,
-        listA.tokens,
-    );
+    return listA;
 
 }
 
 // Merge a token list into a single token of given type
-TokenList merge(TokenType type, funs...)(SourceRange text) {
+Match merge(TokenType type, funs...)(SourceRange text) {
 
-    const matched = match!funs(text);
+    auto matched = match!funs(text);
 
-    return TokenList(matched.consumed, MyAppender([Token(matched.consumed, matched.text, type)]));
-
-}
-
-auto matchText(dstring text)(SourceRange input) {
-
-    import std.string;
-    import std.exception;
-
-    import rcdata.utils;
-
-    // Match EOF
-    static if (text.length == 0) {
-
-        enforceX(input.length == 0, format!"Expected end of file", input);
-
-    }
-
-    // Match the text
-    else enforceX(input.startsWith(text), format!"Couldn't match `%s`"(text), input);
-
-    // Consume the content
-    return consume(text.length, input.take(text.length));
+    return matched
+        ? Match(
+            matched.matched,
+            TokenList([
+                Token(type, matched.data[].map!"a.content".join)
+            ])
+        )
+        : matched;
 
 }
 
@@ -99,30 +59,36 @@ struct SourceRange {
 
     size_t index;
 
-    dchar front() const pure {
+    size_t length() const pure @safe {
+
+        return source.length - index;
+
+    }
+
+    dchar front() const pure @safe {
 
         return source[index];
 
     }
 
-    void popFront() pure {
+    void popFront() pure @safe {
 
         index++;
 
     }
 
-    bool empty() const pure {
+    bool empty() const pure @safe {
 
-        return index >= source.length;
+        return length == 0;
 
     }
 
 }
 
-unittest {
+pure @safe unittest {
 
     // Create a simple grammar
-    TokenList lex(SourceRange range) pure @safe {
+    Match lex(SourceRange range) pure @safe {
 
         return range.matchRepeat!(
             matchOr!(
@@ -158,25 +124,24 @@ unittest {
     with (TokenType) {
 
         // Filter all tokens except those with whitespace
-        auto allButWhitespace = lex(SourceRange()).tokens[].filter!(a => a.type != whitespace);
-        // You'd like to keep them in the final output, as they're needed to calculate all token positions
+        auto result = lex(SourceRange());
 
-        assert(allButWhitespace.equal([
-            Token(1, "\n",     eol),
-            Token(3, "set",    keyword),
-            Token(1, "A",      identifier),
-            Token(2, "15",     number),
-            Token(1, "\n",     eol),
-            Token(2, "if",     keyword),
-            Token(1, "A",      identifier),
-            Token(6, "equals", keyword),
-            Token(2, "15",     number),
-            Token(1, "\n",     eol),
-            Token(4, "echo",   keyword),
-            Token(1, "a",      identifier),
-            Token(1, "\n",     eol),
-            Token(3, "end",    keyword),
-            Token(1, "\n",     eol),
+        assert(result.data[].allButWhitespace.equal([
+            Token(eol,        "\n"),
+            Token(keyword,    "set"),
+            Token(identifier, "A"),
+            Token(number,     "15"),
+            Token(eol,        "\n"),
+            Token(keyword,    "if"),
+            Token(identifier, "A"),
+            Token(keyword,    "equals"),
+            Token(number,     "15"),
+            Token(eol,        "\n"),
+            Token(keyword,    "echo"),
+            Token(identifier, "a"),
+            Token(eol,        "\n"),
+            Token(keyword,    "end"),
+            Token(eol,        "\n"),
         ]));
 
     }

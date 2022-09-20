@@ -1,9 +1,6 @@
 module parser.base;
 
-import std.conv;
 import std.range;
-import std.algorithm;
-
 import rcdata.parser;
 
 
@@ -15,36 +12,29 @@ enum TokenType {
 
 struct Token {
 
-    size_t consumed;
-    dstring content;
     TokenType type;
+    string content;
 
 }
 
-struct TokenList {
+Token[] consume(Take!string input) pure @safe {
 
-    size_t consumed;
-    Token[] tokens;
+    import std.conv;
 
-    dstring text() const pure @safe {
-
-        return tokens.map!"a.content.dtext".join;
-
-    }
+    return [Token(TokenType.none, input.to!string)];
 
 }
 
-TokenList consume(size_t consumed, Take!string input) pure @safe {
+Token[] consume(Token[] listA, Token[] listB) pure @safe {
 
-    return TokenList(consumed, [Token(consumed, input.to!dstring)]);
+    return listA ~ listB;
 
 }
 
-TokenList consume(TokenList listA, TokenList listB) pure @safe {
+auto allButWhitespace(Range)(Range tokens) {
 
-    return TokenList(
-        listA.consumed + listB.consumed,
-        listA.tokens ~ listB.tokens
-    );
+    import std.algorithm;
+
+    return tokens.filter!(a => a.type != TokenType.whitespace);
 
 }

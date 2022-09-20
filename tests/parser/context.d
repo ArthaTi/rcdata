@@ -15,6 +15,6 @@ unittest {
         Foo.matchAny!(a => count-- > 0)
     )("hello, world!");
 
-    assert(result.tokens[0] == Token(1, "h"));
+    assert(result.data[0] == Token(TokenType.none, "h"));
 
 }

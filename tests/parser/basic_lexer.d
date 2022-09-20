@@ -14,18 +14,26 @@ struct Parser {
     static:
 
     // Merge a token list into a single token of given type
-    TokenList merge(TokenType type, funs...)(string text) {
+    Match merge(TokenType type, funs...)(string text) {
 
-        const matched = match!funs(text);
+        import std.array;
 
-        return TokenList(matched.consumed, [Token(matched.consumed, matched.text, type)]);
+        auto matched = match!funs(text);
+
+        return matched
+            ? Match(
+                matched.matched,
+                [Token(type, matched.data.map!"a.content".join)]
+            )
+            : matched;
 
     }
 
     // A simple grammar
-    TokenList lex(string input) @safe pure {
+    Match lex(string input) @safe pure {
 
-        return matchRepeat!(
+        return matchUntil!(
+            "",  // Match until end of file
             matchOr!(
                 merge!(
                     TokenType.keyword,
@@ -63,39 +71,64 @@ unittest {
 
     // Note: see file for definitions of TokenList, Token, etc.
 
-    string source = `
+    Parser.Match result = Parser.lex(`
         set A 15
         if A equals 15
             echo a
         end
+    `);
+
+    // Check tokens except those with whitespace
+    with (TokenType)
+    assert(result.data.allButWhitespace.equal([
+        Token(eol,        "\n"),
+        Token(keyword,    "set"),
+        Token(identifier, "A"),
+        Token(number,     "15"),
+        Token(eol,        "\n"),
+
+        Token(keyword,    "if"),
+        Token(identifier, "A"),
+        Token(keyword,    "equals"),
+        Token(number,     "15"),
+        Token(eol,        "\n"),
+
+        Token(keyword,    "echo"),
+        Token(identifier, "a"),
+        Token(eol,        "\n"),
+
+        Token(keyword,    "end"),
+        Token(eol,        "\n"),
+    ]));
+
+}
+
+// If a match fails, we can find out where it happened
+unittest {
+
+    string source = `
+        set A 1
+        set B // We never defined a syntax for comments!
     `;
 
-    TokenList result = Parser.lex(source);
+    Parser.Match result = Parser.lex(source);
 
-    with (TokenType) {
+    assert(!result);
 
-        // Filter all tokens except those with whitespace
-        auto allButWhitespace = result.tokens.filter!(a => a.type != whitespace);
-        // You'd like to keep them in the final output, as they're needed to calculate all token positions
+    // matched.source should point at the comment
+    assert(result.matched.source == source.find("//"));
 
-        assert(allButWhitespace.equal([
-            Token(1, "\n",     eol),
-            Token(3, "set",    keyword),
-            Token(1, "A",      identifier),
-            Token(2, "15",     number),
-            Token(1, "\n",     eol),
-            Token(2, "if",     keyword),
-            Token(1, "A",      identifier),
-            Token(6, "equals", keyword),
-            Token(2, "15",     number),
-            Token(1, "\n",     eol),
-            Token(4, "echo",   keyword),
-            Token(1, "a",      identifier),
-            Token(1, "\n",     eol),
-            Token(3, "end",    keyword),
-            Token(1, "\n",     eol),
-        ]));
+    // Match data should include all tokens before the match
+    with (TokenType)
+    assert(result.data.allButWhitespace.equal([
+        Token(eol,        "\n"),
+        Token(keyword,    "set"),
+        Token(identifier, "A"),
+        Token(number,     "1"),
+        Token(eol,        "\n"),
 
-    }
+        Token(keyword,    "set"),
+        Token(identifier, "B"),
+    ]));
 
 }
