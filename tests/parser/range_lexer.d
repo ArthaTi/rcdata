@@ -6,7 +6,7 @@ import std.array;
 import std.range;
 import std.algorithm;
 
-import parser.base;
+import tests.parser.base;
 import rcdata.parser;
 
 
@@ -14,9 +14,9 @@ alias TokenList = Appender!(Token[]);
 
 
 // Create the parser
-mixin makeParser!(SourceRange, consume);
+mixin makeParser!(SourceRange, supply);
 
-TokenList consume(Take!SourceRange input) pure @safe {
+TokenList supply(Take!SourceRange input) pure @safe {
 
     return TokenList([
         Token(TokenType.none, input.to!string)
@@ -24,7 +24,7 @@ TokenList consume(Take!SourceRange input) pure @safe {
 
 }
 
-TokenList consume(TokenList listA, TokenList listB) pure @safe {
+TokenList supply(TokenList listA, TokenList listB) pure @safe {
 
     put(listA, listB[]);
 

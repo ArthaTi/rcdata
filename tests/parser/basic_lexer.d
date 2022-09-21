@@ -1,15 +1,17 @@
 /// Basic rcdata.parser usage with arrays.
-version (unittest) private pure @safe:
+module tests.parser.basic_lexer;
+
+pure @safe:
 
 import std.algorithm;
 import rcdata.parser;
-import parser.base;
+import tests.parser.base;
 
 
 // Create the parser
-struct Parser {
+struct Lexer {
 
-    mixin makeParser!(string, consume);
+    mixin makeParser!(string, supply);
 
     static:
 
@@ -34,31 +36,66 @@ struct Parser {
 
         return matchUntil!(
             "",  // Match until end of file
+            token,
+        )(input);
+
+    }
+
+    /// Match any token
+    Match token(string input) pure @safe {
+
+        return matchOr!(
+            merge!(
+                TokenType.keyword,
+                matchOr!("if", "else", "end", "set", "equals", "echo"),
+            ),
+            merge!(
+                TokenType.number,
+                matchRepeatMinOnce!(
+                    matchAny!(a => a >= '0' && a <= '9')
+                )
+            ),
+            merge!(
+                TokenType.identifier,
+                matchAny!(a => a >= 'a' && a <= 'z' || a >= 'A' && a <= 'Z')
+            ),
+
+            // Also match "insignificant" tokens such as whitespace or comments
+            insignificant,
+        )(input);
+
+    }
+
+    /// Insignificant tokens: whitespace and commentss
+    Match insignificant(string input) pure @safe {
+
+        return matchOr!(
+
+            endOfLine,
+
+            merge!(
+                TokenType.comment,
+                "//",
+                matchUntil!endOfLine,
+            ),
+
+            merge!(
+                TokenType.whitespace,
+                matchRepeatMinOnce!(
+                    matchOr!(" ", "\t")
+                )
+            ),
+
+        )(input);
+
+    }
+
+    Match endOfLine(string input) pure @safe {
+
+        return merge!(
+            TokenType.eol,
             matchOr!(
-                merge!(
-                    TokenType.keyword,
-                    matchOr!("if", "else", "end", "set", "equals", "echo"),
-                ),
-                merge!(
-                    TokenType.number,
-                    matchRepeatMinOnce!(
-                        matchAny!(a => a >= '0' && a <= '9')
-                    )
-                ),
-                merge!(
-                    TokenType.identifier,
-                    matchAny!(a => a >= 'a' && a <= 'z' || a >= 'A' && a <= 'Z')
-                ),
-                merge!(
-                    TokenType.eol,
-                    matchOr!("\r\n", "\r", "\n")
-                ),
-                merge!(
-                    TokenType.whitespace,
-                    matchRepeatMinOnce!(
-                        matchOr!(" ", "\t")
-                    )
-                ),
+                "\r\n", "\r", "\n"
             )
         )(input);
 
@@ -71,7 +108,7 @@ unittest {
 
     // Note: see file for definitions of TokenList, Token, etc.
 
-    Parser.Match result = Parser.lex(`
+    Lexer.Match result = Lexer.lex(`
         set A 15
         if A equals 15
             echo a
@@ -108,15 +145,15 @@ unittest {
 
     string source = `
         set A 1
-        set B // We never defined a syntax for comments!
+        set B  # This isn't the correct syntax for comments!
     `;
 
-    Parser.Match result = Parser.lex(source);
+    Lexer.Match result = Lexer.lex(source);
 
     assert(!result);
 
     // matched.source should point at the comment
-    assert(result.matched.source == source.find("//"));
+    assert(result.matched.source == source.find("#"));
 
     // Match data should include all tokens before the match
     with (TokenType)

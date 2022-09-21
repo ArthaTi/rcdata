@@ -1,4 +1,4 @@
-module parser.base;
+module tests.parser.base;
 
 import std.range;
 import rcdata.parser;
@@ -6,7 +6,7 @@ import rcdata.parser;
 
 enum TokenType {
 
-    none, keyword, identifier, number, whitespace, eol
+    none, keyword, identifier, number, comment, whitespace, eol
 
 }
 
@@ -17,7 +17,7 @@ struct Token {
 
 }
 
-Token[] consume(Take!string input) pure @safe {
+Token[] supply(Take!string input) pure @safe {
 
     import std.conv;
 
@@ -25,7 +25,7 @@ Token[] consume(Take!string input) pure @safe {
 
 }
 
-Token[] consume(Token[] listA, Token[] listB) pure @safe {
+Token[] supply(Token[] listA, Token[] listB) pure @safe {
 
     return listA ~ listB;
 

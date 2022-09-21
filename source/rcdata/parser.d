@@ -9,6 +9,9 @@ import std.exception;
 
 import rcdata.utils;
 
+// TODO for each matcher, write a set of tests with no captures, one capture and multiple captures, mix them all too!
+
+
 /// Check if the given function is a valid parser data supplier.
 enum isMatchDataSupplier(Input, alias supply) = __traits(compiles, MatchData!(Input, supply));
 
@@ -38,11 +41,20 @@ template MatchData(Input, alias supply) {
 }
 
 /// Result of the match.
-struct MatchImpl(Input, alias supply) {
+/// Params:
+///     Input  = Input range used by the parser.
+///     supply = Function supplying user data such as tokens.
+///     Ts     = Optional types for additional values to hold within the match, used to add result data specific to
+///         a matcher. If provided, the match can be implicitly casted to the original match type.
+struct MatchImpl(Input, alias supply, Ts...) {
 
-    alias Match = typeof(this);
     alias Data = MatchData!(Input, supply);
     alias ParserException = ParserExceptionImpl!(Input, supply);
+    alias Match = typeof(this);
+    alias BaseMatch = MatchImpl!(Input, supply);
+
+    /// Types of the captured values.
+    alias Capture = Ts;
 
     static assert(hasDefaultConstructor!Data, Data.stringof ~ " must support default construction");
     static assert(hasDefaultConstructor!(Take!Input), Take!Input.stringof ~ " must support default construction");
@@ -59,24 +71,36 @@ struct MatchImpl(Input, alias supply) {
     /// used, and will contain the source range starting at the point of the match start.
     Take!Input matched;
 
+    /// Additional data added by a specific matcher function.
+    Ts capture;
+
+    // Holding an additional value, make the struct implicitly convert into its base
+    static if (Ts.length != 0) {
+
+        alias base this;
+
+    }
+
 
     /// Match succeeded. Calls `supply`.
-    auto this(Input source, size_t consumed) {
+    auto this(Input source, size_t consumed, Ts values) {
 
         this.matched = source.take(consumed);
         this.data = supply(this.matched);
+        this.capture = values;
 
     }
 
-    /// Match succeeded, but pass the data directly instead of `supply`. Useful for altering existing matches.
-    this(Take!Input matched, Data data) nothrow pure @safe @nogc {
+    /// Match succeeded, but pass the data directly instead of calling `supply`. Useful for altering existing matches.
+    this(Take!Input matched, Data data, Ts values) nothrow pure @safe @nogc {
 
         this.matched = matched;
         this.data = data;
+        this.capture = values;
 
     }
 
-    private this(typeof(this.tupleof) args) nothrow pure @safe @nogc{
+    private this(inout typeof(this.tupleof) args) inout nothrow pure @safe @nogc {
 
         this.tupleof = args;
 
@@ -93,7 +117,7 @@ struct MatchImpl(Input, alias supply) {
     ///     data   = Optionally, context data for the failure, i.e. result data that matched successfully right before.
     static Match fail(Input source, string error, Data data = Data.init) nothrow pure @safe @nogc {
 
-        return Match(error, data, source.take(0));
+        return Match(error, data, source.take(0), Ts.init);
 
     }
 
@@ -112,6 +136,24 @@ struct MatchImpl(Input, alias supply) {
     size_t consumed() const nothrow pure @safe @nogc {
 
         return matched.maxLength;
+
+    }
+
+    /// Get the base match struct, without capture data.
+    inout(BaseMatch) base() inout nothrow pure @safe @nogc {
+
+        return inout BaseMatch(error, data, matched);
+
+    }
+
+    /// Assign a slice of the capture output.
+    void captureFrom(size_t index, Ts...)(Ts values) {
+
+        static if (values.length != 0) {
+
+            this.capture[index .. index + Ts.length] = values;
+
+        }
 
     }
 
@@ -243,6 +285,7 @@ if (is(ElementType!Input : dchar)) {
 /// ditto
 mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
+    import std.meta;
     import std.format;
     import std.range;
     import std.traits;
@@ -257,7 +300,84 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     static assert(isInputRange!Input, Input.stringof ~ " isn't an input range");
 
     alias Match = rcdata.parser.MatchImpl!(Input, supply);
+    alias MatchCapture(Ts...) = rcdata.parser.MatchImpl!(Input, supply, Ts);
     alias ParserException = rcdata.parser.ParserExceptionImpl!(Input, supply);
+
+
+    /// Get an AliasSeq of capture types held by a given list of `Match` and `MatchCapture` types.
+    template MatchCaptureTypes(Ts...) {
+
+        alias MatchCaptureTypes = AliasSeq!();
+
+        static foreach (T; Ts) {
+
+            static assert(is(T : Match), T.stringof ~ " is not a Match subtype.");
+
+            // Found a match type
+            static if (is(T : Match)) {
+
+                MatchCaptureTypes = AliasSeq!(MatchCaptureTypes, T.Capture);
+
+            }
+
+        }
+
+    }
+
+    /// Check the match type returned by `match` for the given pattern.
+    template MatchType(pattern...) {
+
+        static if (pattern.length == 1) {
+
+            alias MatchType = typeof(matchImpl!pattern(Input.init));
+
+        }
+
+        // Note: We return the type of (match!pattern) rather than the tuple of match types.
+        else alias MatchType = MatchCapture!(PatternCaptureTypes!pattern);
+
+    }
+
+    /// Get an alias seq of capture types, similarly to `PatternCaptureTypes`, but based on a pattern for `match`.
+    alias PatternCaptureTypes(pattern...) = MatchCaptureTypes!(staticMap!(MatchType, pattern));
+
+    /// Iterate on the given pattern tuple.
+    struct CaptureTupleIterator(patterns...) {
+
+        static int opApply(scope int delegate(size_t patternIndex, size_t captureIndex) dg) @system {
+
+            size_t patternIndex, captureIndex;
+
+            // Check each item in the pattern
+            static foreach (pattern; patterns) {{
+
+                alias T = MatchType!pattern;
+
+                static assert(is(T : Match),
+                    pattern.stringof ~ " does not return a valid Match instance but a " ~ T.stringof);
+
+                // Return the pattern and capture indices
+                if (auto result = dg(patternIndex, captureIndex)) {
+
+                    return result;
+
+                }
+
+                // Bump them
+                patternIndex++;
+                captureIndex += T.Capture.length;
+
+            }}
+
+            return 0;
+
+        }
+
+    }
+
+
+    static assert(is(Match == MatchCapture!()));
+    static assert(is(MatchCapture!int == MatchCapture!(MatchCaptureTypes!(Match, MatchCapture!int))));
 
     /// Match anything.
     alias matchAny() = (Input input)
@@ -292,44 +412,23 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     ///     pattern = Pattern that has to be matched.
     ///     input   = Source to parse.
     ///     context = Optionally, previous match result. Must be successful.
-    alias match(pattern...) = (Input input, Match context = Match.init) {
+    alias match(pattern...) = (Input input, MatchType!pattern context = MatchType!pattern.init) {
 
         assert(context, "Given context match has failed");
 
+        alias Return = MatchType!pattern;
+
         Input source = input;
-        Match result = context;
+        Return result = context;
 
         // This function cannot match less than matched by the context
         scope (exit) assert(result.consumed >= context.consumed);
 
         // Evaluate each matcher
-        try static foreach (i, fun; pattern) {{
+        try static foreach (index, captureIndex; CaptureTupleIterator!pattern) {{
 
-            Match local;
-
-            // Try to run the matcher
-            static if (__traits(compiles, local = fun(source))) {
-
-                local = fun(source);
-
-            }
-
-            // It's not callable. But maybe basicMatcher can handle it?
-            else static if (__traits(compiles, local = basicMatcher!fun(source))) {
-
-                // Alias to basicMatcher
-                local = basicMatcher!fun(source);
-
-            }
-
-            // Try both to see what the errors are
-            else {
-
-                local = fun(source);
-                local = basicMatcher!fun(source);
-
-            }
-
+            // Try the match
+            auto local = matchImpl!(pattern[index])(source);
 
             // Combine data
             auto data = supply(result.data, local.data);
@@ -338,15 +437,18 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
             if (!local) {
 
                 // Return its match with updated data
-                return Match.fail(local.matched.source, local.error, data);
+                return Return.fail(local.matched.source, local.error, data);
 
             }
 
             // Success, expand the match to contain the full result
-            result = Match(
-                result.matched.source.take(result.consumed + local.consumed),
-                data,
-            );
+            result.matched = result.matched.source.take(result.consumed + local.consumed);
+
+            // Add user data
+            result.data = data;
+            result.captureFrom!captureIndex(local.capture);
+
+            assert(result);
 
             // Advance the input range
             source.popFrontN(local.consumed);
@@ -364,9 +466,39 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
     };
 
+    private alias matchImpl(alias fun) = (Input input) {
+
+        // Try to run the matcher
+        static if (is(typeof(fun(input)) : Match)) {
+
+            return fun(input);
+
+        }
+
+        // It's not callable. But maybe basicMatcher can handle it?
+        else static if (is(typeof(basicMatcher!fun(input)) : Match)) {
+
+            // Alias to basicMatcher
+            return basicMatcher!fun(input);
+
+        }
+
+        // Try both to see what the errors are
+        else {
+
+            Match local = fun(input);
+            Match local = basicMatcher!fun(input);
+
+        }
+
+        assert(false);
+
+    };
 
     /// Match one of the given items.
     alias matchOr(pattern...) = (Input input) {
+
+        alias ReturnMatch = MatchOr!pattern;
 
         // Evaluate each matcher
         foreach (fun; pattern) {
@@ -374,15 +506,62 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
             // Return the result of the first one succeeding
             if (auto result = match!fun(input)) {
 
-                return result;
+                // Cast the capture to our expected type
+                ReturnMatch.Capture capture = result.capture;
+
+                return ReturnMatch(result.matched, result.data, capture);
 
             }
 
         }
 
-        return Match.fail(input, "No match found for matchOr!(" ~ pattern.stringof ~ ")");
+        return ReturnMatch.fail(input, "No match found for matchOr!(" ~ pattern.stringof ~ ")");
 
     };
+
+    /// Return the list of possible values for given matchOr pattern.
+    template MatchOr(pattern...) {
+
+        import std.meta;
+        import std.sumtype;
+        import std.typecons : Tuple;
+
+        // Collect possible values for the capture.
+        alias Types = AliasSeq!();
+
+        // Check each pattern
+        static foreach (fun; pattern) {
+
+            // Empty, add an empty tuple as a possible value
+            static if (MatchType!fun.Capture.length == 0)
+                Types = AliasSeq!(Types, Tuple!());
+
+            // One item
+            else static if (MatchType!fun.Capture.length == 1)
+                Types = AliasSeq!(Types, MatchType!fun.Capture[0]);
+
+            // Multiple items, add them as a tuple
+            else
+                Types = AliasSeq!(Types, Tuple!(MatchType!fun.Capture));
+
+        }
+
+        // Get rid of duplicates
+        Types = NoDuplicates!Types;
+
+
+        // No types, return a plain match
+        static if (Types.length == 0 || is(Types[0] == Tuple!()))
+            alias MatchOr = Match;
+
+        // One type only, return it
+        else static if (Types.length == 1)
+            alias MatchOr = MatchCapture!Types;
+
+        // Multiple types, make it a sum type
+        else alias MatchOr = MatchCapture!(SumType!Types);
+
+    }
 
     /// Repeat the token sequence (as in `match`) zero to infinity times
     alias matchRepeat(pattern...) = (Input input)
@@ -513,6 +692,149 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
         // Ignore failures
         else return Match(input, 0);
+
+    };
+
+    /// Construct `T` by matching given `pattern`.
+    /// Returns: `MatchCapture!T` holding the constructed value.
+    alias matchCapture(T, pattern...) = (Input input, T value = T.init) {
+
+        alias Result = MatchCapture!T;
+
+        Input source = input;
+        auto result = Result(input, 0, value);
+
+        /// Union to hold results of each pattern match
+        union Capture {
+
+            // Create storage for each value
+            static foreach (i, fun; pattern) {
+
+                static if (!is(ByIndex!i == void))
+                mixin("ByIndex!i c", i, ";");
+
+            }
+
+            /// Type of the value at given index. Return void if there's no value.
+            alias ByIndex(ptrdiff_t i) = mixin(
+                __traits(compiles, mixin("c", i))
+                ? q{ typeof(byIndex!i) }
+                : q{ typeof(run!i(source, result)) }
+            );
+
+            /// Run the rule at given index. Does not store the result.
+            auto run(ptrdiff_t i)(Input input, ref Result match) {
+
+                // Get the previous value
+                auto last = byIndex!(i-1);
+
+                // Run this rule
+                return matchCaptureImpl!(T, pattern[i])(input, match.capture, last);
+
+            }
+
+            /// Get a stored value by its index.
+            auto ref byIndex(ptrdiff_t i)() @trusted {
+
+                // If it exists, return the last captured type
+                static if (__traits(compiles, mixin("c", i))) {
+
+                    return mixin("c", i);
+
+                }
+
+                // Return null
+                else return null;
+
+            }
+
+        }
+
+        Capture capture;
+
+        // Evaluate each rule
+        try static foreach (i, fun; pattern) {{
+
+            // If this is a matcher
+            static if (is(capture.ByIndex!i : Match)) {
+
+                // Run the rule
+                Match local = capture.byIndex!i = capture.run!i(source, result);
+
+                // Combine data
+                auto data = supply(result.data, local.data);
+
+                // Match failed
+                if (!local) {
+
+                    return Match.fail(local.matched.source, local.error, data);
+
+                }
+
+                // Success
+                result = MatchCapture!T(
+                    result.matched.source.take(result.consumed + local.consumed),
+                    data,
+                    result.value,
+                );
+
+                // Advance the input range
+                source.popFrontN(local.consumed);
+
+            }
+
+            // Void
+            else static if (is(capture.ByIndex!i == void)) {
+
+                capture.run!i(source, result);
+
+            }
+
+            // Non-void, run the function and read the value
+            else capture.byIndex!i = capture.run!i(source, result);
+
+        }}
+
+        // Expand any caught exceptions with context info
+        catch (ParserException exc) {
+
+            throw exc.extend(result.data);
+
+        }
+
+        return result;
+
+    };
+
+    private alias matchCaptureImpl(T, alias pattern) = (Input input, ref T value, lastCapture) {
+
+        // Option 1, (T, Input)
+        static if (__traits(compiles, fun(value, input))) {
+
+             return pattern(value, input);
+
+        }
+
+        // Option 2, (T, LastCapture)
+        else static if (__traits(compiles, fun(value, lastCapture))) {
+
+            return pattern(value, lastCapture);
+
+        }
+
+        // Option 2, (T, LastCapture.value)
+        else static if (__traits(compiles, fun(value, lastCapture.value))) {
+
+            return pattern(value, lastCapture.value);
+
+        }
+
+        // Option 4, (Input)
+        else static if (__traits(compiles, fun(input))) {
+
+            return pattern(fun);
+
+        }
 
     };
 

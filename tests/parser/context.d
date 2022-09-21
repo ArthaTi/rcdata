@@ -1,9 +1,9 @@
-import parser.base;
+import tests.parser.base;
 import rcdata.parser;
 
 struct Foo {
 
-    mixin makeParser!(string, consume);
+    mixin makeParser!(string, supply);
 
 }
 
