@@ -7,6 +7,7 @@ import std.string;
 import std.algorithm;
 import std.exception;
 
+
 /// Write a hexdump for debugging. Writes to stdout.
 void hexDump(ubyte[] bytes, int perLine = 16) {
 
@@ -31,14 +32,20 @@ void hexDump(File file, ubyte[] bytes, int perLine = 16) {
 }
 
 /// Stringof improved to better handle callbacks
-template stringofEx(alias foo) {
+enum stringofEx(foo...) = foo.stringof;
 
-    import std.traits;
+/// Run a map on a tuple at runtime.
+auto tupleMap(alias fun, Args...)(Args args) {
 
-    static if (isCallable!foo)
-        enum stringofEx = (&foo).stringof;
-    else
-        enum stringofEx = foo.stringof;
+    import std.meta, std.typecons;
+
+    auto mapItem(alias symbol)() {
+
+        return fun(symbol);
+
+    }
+
+    return tuple(staticMap!(mapItem, args));
 
 }
 

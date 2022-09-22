@@ -6,7 +6,7 @@ import rcdata.parser;
 
 enum TokenType {
 
-    none, keyword, identifier, number, comment, whitespace, eol
+    none, keyword, identifier, number, comment, whitespace, eol, eof
 
 }
 

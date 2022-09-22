@@ -12,7 +12,8 @@
 		"unittest": {
 			"sourcePaths": ["source", "tests"],
 			"includePaths": ["source", "tests"],
-			"buildOptions": ["unittests", "debugMode", "debugInfo"]
+			"buildOptions": ["unittests", "debugMode", "debugInfo"],
+			"dflags": ["-preview=dip1000"]
 		}
 	},
 	"subPackages": [

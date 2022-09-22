@@ -81,9 +81,15 @@ struct MatchImpl(Input, alias supply, Ts...) {
 
     }
 
+    invariant {
+
+        assert(error is null || matched.maxLength == 0, "`matched` must be empty if there's an error");
+
+    }
+
 
     /// Match succeeded. Calls `supply`.
-    auto this(Input source, size_t consumed, Ts values) {
+    auto this(Input source, size_t consumed, Ts values, string filename = __FILE__, size_t line = __LINE__) {
 
         this.matched = source.take(consumed);
         this.data = supply(this.matched);
@@ -92,7 +98,7 @@ struct MatchImpl(Input, alias supply, Ts...) {
     }
 
     /// Match succeeded, but pass the data directly instead of calling `supply`. Useful for altering existing matches.
-    this(Take!Input matched, Data data, Ts values) nothrow pure @safe @nogc {
+    this(Take!Input matched, Data data, Ts values, string filename = __FILE__, size_t line = __LINE__) nothrow pure @safe @nogc {
 
         this.matched = matched;
         this.data = data;
@@ -106,6 +112,18 @@ struct MatchImpl(Input, alias supply, Ts...) {
 
     }
 
+    static ok(Input source, size_t consumed, Ts values) {
+
+        return Match(source, consumed, values);
+
+    }
+
+    static ok(Take!Input matched, Data data, Ts values) {
+
+        return Match(matched, data, values);
+
+    }
+
     /// Match failed.
     ///
     /// It's recommended not to use runtime formatted strings for match errors, to avoid constant GC allocations during
@@ -116,6 +134,8 @@ struct MatchImpl(Input, alias supply, Ts...) {
     ///     error  = Error message, a reason why the match failed.
     ///     data   = Optionally, context data for the failure, i.e. result data that matched successfully right before.
     static Match fail(Input source, string error, Data data = Data.init) nothrow pure @safe @nogc {
+
+        assert(error !is null, "Error for Match.fail must not be null. Note an empty string literal is a valid value.");
 
         return Match(error, data, source.take(0), Ts.init);
 
@@ -149,11 +169,9 @@ struct MatchImpl(Input, alias supply, Ts...) {
     /// Assign a slice of the capture output.
     void captureFrom(size_t index, Ts...)(Ts values) {
 
-        static if (values.length != 0) {
+        static assert(values.length != 0 || Ts.length == 0);
 
-            this.capture[index .. index + Ts.length] = values;
-
-        }
+        this.capture[index .. index + Ts.length] = values;
 
     }
 
@@ -167,6 +185,7 @@ struct MatchImpl(Input, alias supply, Ts...) {
     const toString() {
 
         import std.conv;
+        import std.meta;
         import std.format;
 
         enum maxLength = 32;
@@ -195,13 +214,20 @@ struct MatchImpl(Input, alias supply, Ts...) {
         // Match fits, include the full text
         else matchedText = format!"%(%s%)"(matchedArr.only);
 
+
+        static if (Capture.length)
+            const joined = ", " ~ only(tupleMap!text(capture).expand).join(", ");
+        else
+            const joined = "";
+
         return this
-            ? format!"Match(%s, %s)"(matchedText, data)
-            : format!"Match.fail(%s, %s)"(matchedText, error.only);
+            ? format!"Match(%s, %s%s)"(matchedText, data, joined)
+            : format!"Match.fail(%s, %(%s%)%s)"(matchedText, error.only, joined);
 
     }
 
 }
+
 
 unittest {
 
@@ -254,9 +280,13 @@ unittest {
 mixin template makeParser(Input, alias supply)
 if (is(ElementType!Input : dchar)) {
 
+    import std.string;
+
     mixin makeParser!(Input, supply, matchText);
 
-    static auto matchText(dstring text)(Input input) {
+    static auto matchText(dstring text)(Input input)
+    out (r; text.length == 0 || !r || r.consumed != 0, format!"matchText `%s` consumed nothing"(text))
+    do {
 
         import std.range;
         import std.string;
@@ -408,10 +438,19 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     /// matcher (either the given matcher function, or `basicMatcher` as a fallback for convenience), and it can be used
     /// to build any other sequential patterns (such as `matchRepeat`) by utilising the `context` parameter.
     ///
+    /// A matcher function will be tried with each of the following:
+    ///
+    /// * `fun(input, capture)` if the function returns capture data, to pass on data from its previous iterations.
+    /// * `fun(input)` to perform a regular match.
+    /// * `basicMatcher!fun(input)` as a convenience call for the chosen `basicMatcher`; for example, the default
+    ///   `basicMatcher` for any dchar range would allow using strings as match patterns:
+    ///   `match!"Hello,"("Hello, World!")`
+    /// * If none of those can compile, `match` will output the errors of `fun(input)` and `basicMatcher!fun(input)`.
+    ///
     /// Params:
     ///     pattern = Pattern that has to be matched.
     ///     input   = Source to parse.
-    ///     context = Optionally, previous match result. Must be successful.
+    ///     context = Optionally, previous match result if used within repetitive matchers. Must be successful.
     alias match(pattern...) = (Input input, MatchType!pattern context = MatchType!pattern.init) {
 
         assert(context, "Given context match has failed");
@@ -427,8 +466,13 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
         // Evaluate each matcher
         try static foreach (index, captureIndex; CaptureTupleIterator!pattern) {{
 
+            alias Local = MatchType!(pattern[index]);
+
+            // Get the last capture for this matcher, if any
+            auto lastCapture = result.capture[captureIndex..captureIndex + Local.Capture.length];
+
             // Try the match
-            auto local = matchImpl!(pattern[index])(source);
+            Local local = matchImpl!(pattern[index])(source, lastCapture);
 
             // Combine data
             auto data = supply(result.data, local.data);
@@ -441,12 +485,23 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
             }
 
+            import std.stdio;
+            debug if (local.consumed == 0) {
+
+                static if (__traits(compiles, __traits(getLocation, pattern[index])))
+                    writefln!"warning: empty match returned by %s at %s,%s,%s"(
+                        stringofEx!(pattern[index]), __traits(getLocation, pattern[index]));
+                else
+                    writefln!"warning: empty match returned by %s"(stringofEx!(pattern[index]));
+
+            }
+
             // Success, expand the match to contain the full result
             result.matched = result.matched.source.take(result.consumed + local.consumed);
 
             // Add user data
             result.data = data;
-            result.captureFrom!captureIndex(local.capture);
+            result.capture[captureIndex .. captureIndex + Local.Capture.length] = local.capture;
 
             assert(result);
 
@@ -466,34 +521,65 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
     };
 
-    private alias matchImpl(alias fun) = (Input input) {
+    /// Try the overloads of the function to perform the match.
+    private template matchImpl(alias fun) {
 
-        // Try to run the matcher
-        static if (is(typeof(fun(input)) : Match)) {
+        // Overload 1: regular match
+        alias matchImpl = (Input input) {
 
-            return fun(input);
+            // Try to run the matcher
+            static if (is(typeof(fun(input)) : Match)) {
 
-        }
+                return fun(input);
 
-        // It's not callable. But maybe basicMatcher can handle it?
-        else static if (is(typeof(basicMatcher!fun(input)) : Match)) {
+            }
 
-            // Alias to basicMatcher
-            return basicMatcher!fun(input);
+            // It's not callable. But maybe basicMatcher can handle it?
+            else static if (is(typeof(basicMatcher!fun(input)) : Match)) {
 
-        }
+                // Alias to basicMatcher
+                return basicMatcher!fun(input);
 
-        // Try both to see what the errors are
-        else {
+            }
 
-            Match local = fun(input);
-            Match local = basicMatcher!fun(input);
+            // Try both to see what the errors are
+            else {
 
-        }
+                Match local = fun(input);
+                local = basicMatcher!fun(input);
 
-        assert(false);
+            }
 
-    };
+            assert(false);
+
+        };
+
+        alias Capture = typeof(matchImpl(Input.init)).Capture;
+
+        // Overload 2, if no.1 has a capture, pass the previous capture data into it, to allow things like matchRepeat
+        // keep context.
+        static if (Capture.length != 0)
+        alias matchImpl = (Input input, Capture capture) {
+
+            alias stringofone(funs...) = funs.stringof;
+
+            // Special overload supported
+            static if (is(typeof(fun(input, capture)) : Match)) {
+
+                static assert(is(typeof(fun(input, capture)) == typeof(fun(input))),
+                    format!("`%s %s(input, capture)` return type doesn't match the one of `%s %2$s(input)`")
+                           (typeof(fun(input, capture)).stringof, stringofone!fun, typeof(fun(input)).stringof));
+
+                return fun(input, capture);
+
+            }
+
+            // Run the default overload otherwise
+            else return matchImpl(input);
+
+        };
+
+    }
 
     /// Match one of the given items.
     alias matchOr(pattern...) = (Input input) {
@@ -564,40 +650,43 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     }
 
     /// Repeat the token sequence (as in `match`) zero to infinity times
-    alias matchRepeat(pattern...) = (Input input)
+    alias matchRepeat(pattern...) = (Input input, MatchType!pattern context = MatchType!pattern.init)
 
-        => matchRepeatMin!(0, pattern)(input);
+        => matchRepeatMin!(0, pattern)(input, context);
 
 
     /// Repeat the token sequence at least once.
-    alias matchRepeatMinOnce(pattern...) = (Input input)
+    alias matchRepeatMinOnce(pattern...) = (Input input, MatchType!pattern context = MatchType!pattern.init)
 
-        => matchRepeatMin!(1, pattern)(input);
+        => matchRepeatMin!(1, pattern)(input, context);
 
 
-    alias matchRepeatMin(size_t minMatches, pattern...) = (Input input)
+    alias matchRepeatMin(size_t minMatches, pattern...) = (Input input,
+        MatchType!pattern context = MatchType!pattern.init)
 
-        => matchRepeatRange!pattern(input, minMatches);
+        => matchRepeatRange!pattern(input, context, minMatches);
 
 
     /// Repeat the token sequence (as in match) `minMatches` to `maxMatches` times
-    alias matchRepeatRange(size_t minMatches, size_t maxMatches, pattern...) = (Input input)
+    alias matchRepeatRange(size_t minMatches, size_t maxMatches, pattern...) = (Input input,
+        MatchType!pattern context = MatchType!pattern.init)
 
-        => matchRepeatRange!pattern(input, minMatches, maxMatches);
+        => matchRepeatRange!pattern(input, context, minMatches, maxMatches);
 
 
     /// ditto
     template matchRepeatRange(pattern...)
     if (!is(typeof(pattern[0]) : size_t)) {
 
-        alias matchRepeatRange = (Input input, size_t minMatches, size_t maxMatches = size_t.max) {
+        alias matchRepeatRange = (Input input, MatchType!pattern context = MatchType!pattern.init,
+            size_t minMatches = 0, size_t maxMatches = size_t.max)
+        {
 
-            Match context;
             size_t matches;
 
             while (true) {
 
-                Match local;
+                MatchType!pattern local;
 
                 // Match the token
                 local = match!pattern(input, context);
@@ -624,7 +713,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
             // Check if matched enough times
             return matches < minMatches
-                ? Match.fail(input, "matchRepeat didn't match enough times")
+                ? context.fail(input, "matchRepeat didn't match enough times")
                 : context;
 
         };
@@ -647,9 +736,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     template matchUntil(alias terminator, pattern...)
     if (pattern.length != 0) {
 
-        alias matchUntil = (Input input) {
-
-            Match context;
+        alias matchUntil = (Input input, MatchType!pattern context = MatchType!pattern.init) {
 
             while (true) {
 
@@ -681,21 +768,34 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     }
 
     /// Match zero or one instances of a token.
+    /// Returns: `Match` or if the value contains captures, `MatchCapture!(Nullable!Match)`.
     alias matchOptional(pattern...) = (Input input) {
 
-        // Match the token
-        if (auto ret = match!pattern(input)) {
+        import std.typecons;
 
-            return ret;
+        // Match the token
+        auto ret = match!pattern(input);
+
+        alias Return = MatchCapture!(Nullable!(ret.Capture));
+
+        // No capture
+        static if (ret.Capture.length == 0) {
+
+            return ret
+                ? ret
+                : Match.ok(input, 0);
 
         }
 
-        // Ignore failures
-        else return Match(input, 0);
+        // Capture on, add a nullable value
+        else return ret
+            ? Return(ret.matched, ret.data, nullable(ret.capture))
+            : Return(input, 0, Nullable!(ret.Capture).init);
 
     };
 
     /// Construct `T` by matching given `pattern`.
+    ///
     /// Returns: `MatchCapture!T` holding the constructed value.
     alias matchCapture(T, pattern...) = (Input input, T value = T.init) {
 
@@ -708,7 +808,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
         union Capture {
 
             // Create storage for each value
-            static foreach (i, fun; pattern) {
+            static foreach (ptrdiff_t i, fun; pattern) {
 
                 static if (!is(ByIndex!i == void))
                 mixin("ByIndex!i c", i, ";");
@@ -725,26 +825,24 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
             /// Run the rule at given index. Does not store the result.
             auto run(ptrdiff_t i)(Input input, ref Result match) {
 
-                // Get the previous value
-                auto last = byIndex!(i-1);
+                static if (__traits(compiles, byIndex!(i-1))) {
+
+                    // Get the previous value
+                    auto last = byIndex!(i-1);
+
+                }
+
+                else auto last = null;
 
                 // Run this rule
-                return matchCaptureImpl!(T, pattern[i])(input, match.capture, last);
+                return matchCaptureImpl!(T, pattern[i], typeof(last))(input, match.capture, last);
 
             }
 
             /// Get a stored value by its index.
-            auto ref byIndex(ptrdiff_t i)() @trusted {
+            ref byIndex(ptrdiff_t i)() @trusted {
 
-                // If it exists, return the last captured type
-                static if (__traits(compiles, mixin("c", i))) {
-
-                    return mixin("c", i);
-
-                }
-
-                // Return null
-                else return null;
+                return mixin("c", i);
 
             }
 
@@ -755,11 +853,19 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
         // Evaluate each rule
         try static foreach (i, fun; pattern) {{
 
+            import std.stdio;
+            debug writefln!"captureMatch %s type %s: is(T : Match) = %s, is(T == void) = %s; %s"(
+                stringofEx!fun, typeid(capture.ByIndex!i),
+                is(capture.ByIndex!i : Match),
+                is(capture.ByIndex!i == void),
+                typeid(Capture.tupleof)
+            );
+
             // If this is a matcher
             static if (is(capture.ByIndex!i : Match)) {
 
                 // Run the rule
-                Match local = capture.byIndex!i = capture.run!i(source, result);
+                Match local = capture.byIndex!i() = capture.run!i(source, result);
 
                 // Combine data
                 auto data = supply(result.data, local.data);
@@ -767,15 +873,18 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
                 // Match failed
                 if (!local) {
 
-                    return Match.fail(local.matched.source, local.error, data);
+                    return Result.fail(local.matched.source, local.error, data);
 
                 }
 
+                import std.stdio;
+                debug writefln!"%s consumed %s + %s"(stringofEx!fun, result.consumed, local.consumed);
+
                 // Success
-                result = MatchCapture!T(
+                result = Result(
                     result.matched.source.take(result.consumed + local.consumed),
                     data,
-                    result.value,
+                    result.capture,
                 );
 
                 // Advance the input range
@@ -802,37 +911,56 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
         }
 
+        debug if (result.consumed == 0) {
+
+            import std.stdio;
+            writefln!"warning: matchCapture!%s returned nothing consumed"(pattern.stringof);
+
+        }
+
         return result;
 
     };
 
-    private alias matchCaptureImpl(T, alias pattern) = (Input input, ref T value, lastCapture) {
+    private alias matchCaptureImpl(T, alias fun, LastCapture) = (Input input, ref T value, LastCapture lastCapture) {
 
-        // Option 1, (T, Input)
-        static if (__traits(compiles, fun(value, input))) {
+        // TODO this function should unconditionally return a match
 
-             return pattern(value, input);
+        // Option 1, (Input, ref T)
+        static if (__traits(compiles, fun(input, value))) {
 
-        }
-
-        // Option 2, (T, LastCapture)
-        else static if (__traits(compiles, fun(value, lastCapture))) {
-
-            return pattern(value, lastCapture);
+             return fun(input, value);
 
         }
 
-        // Option 2, (T, LastCapture.value)
-        else static if (__traits(compiles, fun(value, lastCapture.value))) {
+        // Option 2, (LastCapture, ref T)
+        else static if (__traits(compiles, fun(lastCapture, value))) {
 
-            return pattern(value, lastCapture.value);
+            return fun(lastCapture, value);
 
         }
 
-        // Option 4, (Input)
-        else static if (__traits(compiles, fun(input))) {
+        // Option 3, (LastCapture.capture, ref T)
+        else static if (__traits(compiles, fun(lastCapture.capture, value))) {
 
-            return pattern(fun);
+            return fun(lastCapture.capture, value);
+
+        }
+
+        // Option 4, match(input)
+        else static if (__traits(compiles, match!fun(input))) {
+
+            return match!fun(input);
+            // TODO context?
+
+        }
+
+        else {
+
+            cast(void) fun(input, value);
+            cast(void) fun(lastCapture, value);
+            cast(void) fun(lastCapture.capture, value);
+            cast(void) match!fun(input);
 
         }
 
@@ -908,7 +1036,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
         return result
             ? result
-            : Match.fail(input, message);
+            : result.fail(input, message);
 
     };
 
@@ -919,7 +1047,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
         // Return empty match on success, the result if failed
         return result
-            ? Match(input, 0)
+            ? result.ok(input, 0, result.capture)
             : result;
 
     };

@@ -59,6 +59,10 @@ struct Lexer {
                 TokenType.identifier,
                 matchAny!(a => a >= 'a' && a <= 'z' || a >= 'A' && a <= 'Z')
             ),
+            merge!(
+                TokenType.eof,
+                "",  // basicMatcher special-cases empty string as end of file
+            ),
 
             // Also match "insignificant" tokens such as whitespace or comments
             insignificant,
@@ -77,6 +81,7 @@ struct Lexer {
                 TokenType.comment,
                 "//",
                 matchUntil!endOfLine,
+                endOfLine,
             ),
 
             merge!(
@@ -111,7 +116,7 @@ unittest {
     Lexer.Match result = Lexer.lex(`
         set A 15
         if A equals 15
-            echo a
+            echo A
         end
     `);
 
@@ -131,7 +136,7 @@ unittest {
         Token(eol,        "\n"),
 
         Token(keyword,    "echo"),
-        Token(identifier, "a"),
+        Token(identifier, "A"),
         Token(eol,        "\n"),
 
         Token(keyword,    "end"),
