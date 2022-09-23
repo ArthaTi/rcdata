@@ -1,4 +1,5 @@
 /// AST generation test w/ matchCapture
+import rcdata.utils;
 import rcdata.parser;
 
 // Let's reuse the lexer test
@@ -6,12 +7,13 @@ import tests.parser.base;
 import tests.parser.basic_lexer;
 
 import std.sumtype;
-
-
-mixin makeParser!(string, supply, matchToken);
+import std.typecons;
 
 
 pure @safe:
+mixin makeParser!(string, supply, matchToken);
+
+
 
 
 // Basic parser setup
@@ -37,9 +39,6 @@ Match matchToken(TokenType type)(string source) {
         Lexer.token,
 
     )(source);
-
-    import std.stdio;
-    debug writefln!"matchToken %s"(match);
 
     enum message = format!"Expected a '%s' token"(type);
 
@@ -92,33 +91,16 @@ struct EqualsExpression {
     invariant(left);
     invariant(right);
 
-    version (none)
-    bool opEquals(const EqualsExpression other) const pure @safe @nogc {
-
-        return *left == *other.left
-            && *right == *other.right;
-
-    }
-
 }
 
 
-alias Statement = SumType!(ConditionalStatement, SetStatement, EchoStatement, Expression);
+alias Statement = SumType!(ConditionalStatement, SetStatement, EchoStatement, Expression*);
 
 struct ConditionalStatement {
 
     Expression* condition;
-    Statement[] body;
-    Statement[] elseBody;
-
-    bool opEquals(const ConditionalStatement other) const pure @safe @nogc {
-
-        // Compiler Bugs And Where To Find Them: std.sumtype
-        return condition == other.condition
-            && body == other.body
-            && elseBody == other.elseBody;
-
-    }
+    Statement*[] body;
+    Statement*[] elseBody;
 
 }
 
@@ -145,10 +127,10 @@ MatchCapture!IdentifierExpression identifier(string source) {
         IdentifierExpression,
 
         // Match an identifier
-        TokenType.identifier,
+        match!(TokenType.identifier),
 
         // Load it
-        (string input, ref IdentifierExpression expr) => expr.name = input,
+        (match, ref expr) => expr.name = match.data[1].content,
     );
 
 }
@@ -164,7 +146,7 @@ MatchCapture!NumberExpression number(string source) {
         TokenType.number,
 
         // Load it
-        (string input, ref expr) => expr.value = input.to!int,
+        (match, ref expr) => expr.value = match.data[1].content.to!int,
 
     );
 
@@ -173,28 +155,44 @@ MatchCapture!NumberExpression number(string source) {
 /// Match any expression
 MatchCapture!(Expression*) expression(string source) {
 
+    /// Wraps the type in an expression, needed because `match` cannot operate on sumtypes with pointers
+    static auto matchExpression(alias pattern)(string source) {
+
+        return matchCapture!(
+            Expression*,
+
+            pattern,
+            (a, ref result) => result = new Expression(a),
+        )(source);
+
+    }
+
     return source.matchCapture!(
         Expression*,
 
         // Match any expression
         matchOr!(
-            number,
-            identifier,
+            matchExpression!number,
+            matchExpression!identifier,
         ),
-        (exp, ref result) => new Expression(exp),
+        (exp, ref result) {
+
+            result = exp;
+
+        },
 
         // Match operators
         matchOptional!(
             "equals",
             expression,
         ),
-        (exp, ref result) {
+        (exp, ref result) @safe {
 
             // Matched
             if (!exp.isNull) {
 
                 // Wrap the expression in an equals
-                *result = EqualsExpression(new Expression(result), new Expression(exp.get));
+                result = new Expression(EqualsExpression(result, exp.get));
 
             }
 
@@ -258,7 +256,7 @@ MatchCapture!ConditionalStatement conditional(string source) {
             "else",
             statementList!"end",
         ),
-        (list, ref result) => result.body = list.get([]),
+        (list, ref result) => result.elseBody = list.get([]),
 
         "end",
     );
@@ -271,23 +269,23 @@ MatchCapture!(Statement*) statement(string source) {
         Statement*,
 
         matchOr!(
-            echo,
-            set,
             conditional,
+            set,
+            echo,
             expression,
         ),
-        (stat, ref result) => new Statement(stat),
+        (stat, ref result) @safe => result = stat.match!(a => new Statement(a)),
     );
 
 }
 
-MatchCapture!(Statement[]) statementList(alias terminator)(string source) {
+MatchCapture!(Statement*[]) statementList(alias terminator)(string source) {
 
     // Match as many statements as possible
     return source.matchUntil!(
         terminator,
         matchCapture!(
-            Statement[],
+            Statement*[],
             // Note: matchCapture is inside the repeat loop, so the call can be performed for each match
             // matchRepeat will keep the data in memory
 
@@ -330,33 +328,47 @@ unittest {
     assert(Statement() == Statement());
     assert([Statement()] == [Statement()]);
 
-    import std.stdio;
-    debug writefln!"test: %s %s"(list, list.capture[0]);
-
     // Test boilerplate :D
-    version (none)
-    assert(list.capture[0] == [
+    assert(list.capture[0].equalPtr([
 
-        SetStatement(idA, number15.Expression).Statement,
+        new Statement(
+            SetStatement(idA, new Expression(number15))
+        ),
 
-        ConditionalStatement(
-            EqualsExpression(new Expression(idA), new Expression(number15)).Expression,
-            [
-                EchoStatement(idA.Expression).Statement,
-                EchoStatement(NumberExpression(1).Expression).Statement
-            ]
-        ).Statement,
+        new Statement(
+            ConditionalStatement(
+                new Expression(
+                    EqualsExpression(new Expression(idA), new Expression(number15)),
+                ),
+                [
+                    new Statement(
+                        EchoStatement(new Expression(idA))
+                    ),
+                    new Statement(
+                        EchoStatement(new Expression(NumberExpression(1)))
+                    )
+                ]
+            )
+        ),
 
-        ConditionalStatement(
-            EqualsExpression(new Expression(number15), new Expression(idA)).Expression,
-            [
-                EchoStatement(NumberExpression(1).Expression).Statement
-            ],
-            [
-                EchoStatement(NumberExpression(0).Expression).Statement,
-            ]
-        ).Statement,
+        new Statement(
+            ConditionalStatement(
+                new Expression(
+                    EqualsExpression(new Expression(number15), new Expression(idA)),
+                ),
+                [
+                    new Statement(
+                        EchoStatement(new Expression(NumberExpression(1)))
+                    )
+                ],
+                [
+                    new Statement(
+                        EchoStatement(new Expression(NumberExpression(0)))
+                    ),
+                ]
+            )
+        ),
 
-    ]);
+    ]));
 
 }
