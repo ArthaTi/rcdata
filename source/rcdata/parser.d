@@ -419,6 +419,15 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
 
     }
 
+    TupleWrap!Ts tupleWrap(Ts...)(Ts args) {
+
+        static if (Ts.length == 1)
+            return args[0];
+        else
+            return TupleWrap!Ts(args);
+
+    }
+
 
     static assert(is(Match == MatchCapture!()));
     static assert(is(MatchCapture!int == MatchCapture!(MatchCaptureTypes!(Match, MatchCapture!int))));
@@ -604,6 +613,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
     alias matchOr(pattern...) = (Input input) {
 
         alias ReturnMatch = MatchOr!pattern;
+        alias Capture = ReturnMatch.Capture;
 
         // Evaluate each matcher
         foreach (fun; pattern) {
@@ -612,7 +622,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
             if (auto result = match!fun(input)) {
 
                 // Cast the capture to our expected type
-                ReturnMatch.Capture capture = result.capture;
+                Capture capture = tupleWrap(result.capture);
 
                 return ReturnMatch(result.matched, result.data, capture);
 
