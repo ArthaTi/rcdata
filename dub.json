@@ -11,7 +11,6 @@
 	"buildTypes": {
 		"unittest": {
 			"sourcePaths": ["source", "tests"],
-			"includePaths": ["source", "tests"],
 			"buildOptions": ["unittests", "debugMode", "debugInfo"],
 			"dflags": ["-preview=dip1000"]
 		}
@@ -20,7 +19,7 @@
 		{
 			"name": "json",
 			"sourcePaths": [],
-			"sourceFiles": ["source/rcdata/json.d"],
+			"sourceFiles": ["source/rcdata/json.d", "source/rcdata/utils.d"],
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"
@@ -28,7 +27,7 @@
 		{
 			"name": "bin",
 			"sourcePaths": [],
-			"sourceFiles": ["source/rcdata/bin.d"],
+			"sourceFiles": ["source/rcdata/bin.d", "source/rcdata/utils.d"],
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"
@@ -36,7 +35,7 @@
 		{
 			"name": "parser",
 			"sourcePaths": [],
-			"sourceFiles": ["source/rcdata/parser.d"],
+			"sourceFiles": ["source/rcdata/parser.d", "source/rcdata/utils.d"],
 			"importPaths": ["source"],
 			"targetType": "library",
 			"targetPath": "build"
