@@ -813,7 +813,7 @@ mixin template makeParser(Input, alias supply, alias basicMatcher) {
             alias Return = MatchCapture!Capture;
 
             return ret
-                ? Return(ret.matched, ret.data, Capture(ret.capture))
+                ? Return(ret.matched, ret.data, Capture(tupleWrap(ret.capture)))
                 : Return(input, 0, Capture());
 
         }
