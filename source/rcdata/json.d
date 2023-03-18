@@ -7,6 +7,8 @@ import std.format;
 import std.algorithm;
 import std.exception;
 
+import std.conv : to;
+
 import rcdata.utils;
 
 /// Struct for parsing JSON.
@@ -98,9 +100,16 @@ struct JSONParser {
     ///     T = Built-in type expected to be returned, or an element of the `Type` enum.
     template get(T) {
 
+        enum isTypeEnum(Type type) = is(typeof(T) == Type) && T == type;
+
         // Boolean
-        static if (is(T : bool) || (is(typeof(T) == Type) && T == Type.boolean)) {
+        static if (is(T : bool) || isTypeEnum!(Type.boolean)) {
             alias get = getBoolean;
+        }
+
+        // Enum
+        else static if (is(T == enum) && isNumeric!T) {
+            alias get = getEnum!T;
         }
 
         // Number 1
@@ -109,20 +118,19 @@ struct JSONParser {
         }
 
         // Number 2
-        else static if (is(T == enum) && T == Type.number) {
+        else static if (isTypeEnum!(Type.number)) {
             alias get = getNumber!float;
         }
 
         // String
         else static if (isSomeString!T) {
             T get() {
-                import std.conv : to;
                 return getString.to!T;
             }
         }
 
         // String 2
-        else static if (is(T == enum) && T == Type.string) {
+        else static if (isTypeEnum!(Type.string)) {
             alias get = getString;
         }
 
@@ -143,7 +151,6 @@ struct JSONParser {
 
         else static if (is(T == U[Y], U, Y) && isSomeString!Y) {
             T get() {
-                import std.conv : to;
                 return getAssoc!U.to!T;
             }
         }
@@ -223,6 +230,42 @@ struct JSONParser {
 
         // Or fail
         else throw new JSONException(failFoundMsg("Expected boolean"));
+
+    }
+
+    /// Load a numeric enum; expects either a string or an int value.
+    T getEnum(T)()
+    if (isNumeric!T && is(T == enum)) {
+
+        auto type = peekType;
+
+        if (type == Type.string) {
+
+            return getString.to!T;
+
+        }
+
+        else if (type == Type.number) {
+
+            return getNumber!T;
+
+        }
+
+        else throw new JSONException(failFoundMsg("Expected enum value (string or int)"));
+
+    }
+
+    // Loading enums
+    unittest {
+
+        enum MyEnum {
+            maybe,
+            no,
+            yes,
+        }
+
+        auto json = JSONParser(q{ ["maybe", 1, 2, "yes"] });
+        assert(json.getArray!MyEnum == [MyEnum.maybe, MyEnum.no, MyEnum.yes, MyEnum.yes]);
 
     }
 
@@ -306,8 +349,13 @@ struct JSONParser {
 
         }
 
-        import std.conv : to;
-        return number.to!T;
+        // Enum
+        static if (is(T == enum)) {
+            return number.to!(OriginalType!T).to!T;
+        }
+
+        // Number
+        else return number.to!T;
 
     }
 
@@ -588,7 +636,6 @@ struct JSONParser {
         // Expect an object
         foreach (key; getObject) {
 
-            import std.conv : to;
             import std.string : chomp;
             import std.meta : AliasSeq, staticMap;
 
@@ -720,7 +767,6 @@ struct JSONParser {
 
         auto table = json.getStruct!Table((ref Table table, wstring key) {
 
-            import std.conv : to;
             table.attributes[key.to!string] = json.getString.to!string;
 
         });
@@ -850,8 +896,6 @@ struct JSONParser {
             case 'r': return '\r';
             case 't': return '\t';
             case 'u':
-
-                import std.conv : to;
 
                 // Take next 4 characters
                 auto code = input.take(4).to!string;
@@ -1140,7 +1184,6 @@ unittest {
         "0.0123e-2",
     ]) {
 
-        import std.conv : to;
         import std.string : toLower;
 
         auto res1 = JSONParser(num).getNumber!real;
@@ -1304,7 +1347,6 @@ unittest {
 
     auto product = json.getStruct!Product((ref Product obj, wstring key) {
 
-        import std.conv : to ;
         import std.uni : isAlpha;
         import std.algorithm : countUntil;
 
