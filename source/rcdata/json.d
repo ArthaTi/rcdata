@@ -99,7 +99,7 @@ struct JSONParser {
     template get(T) {
 
         // Boolean
-        static if (is(T : bool) || (is(T == enum) && T == Type.boolean)) {
+        static if (is(T : bool) || (is(typeof(T) == Type) && T == Type.boolean)) {
             alias get = getBoolean;
         }
 

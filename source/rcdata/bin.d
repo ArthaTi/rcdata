@@ -64,7 +64,7 @@ struct RCBin(T, bool isParser) {
     /// Get a value.
     /// Returns: the current `RCBin` instance to allow chaining
     static if (isParser)
-    auto get(T)(ref T target) {
+    RCBin get(T)(ref T target) {
 
         return getImpl(target);
 
@@ -72,7 +72,7 @@ struct RCBin(T, bool isParser) {
 
     /// Ditto
     static if (isSerializer)
-    auto get(T)(const T input) {
+    RCBin get(T)(const T input) {
 
         // Safe cast: getImpl won't modify the clone
         T clone = cast(T) input;
@@ -80,7 +80,7 @@ struct RCBin(T, bool isParser) {
 
     }
 
-    private auto getImpl(T)(ref T target) {
+    private RCBin getImpl(T)(ref T target) {
 
         // Boolean
         static if (is(T == bool)) getBoolean(target);
