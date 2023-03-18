@@ -566,7 +566,8 @@ struct JSONParser {
     /// The object doesn't have to contain all fields defined in the struct or class.
     ///
     /// JSON fields that share names with D reserved keywords can be suffixed with `_` in code, per the
-    /// $(LINK2 https://dlang.org/dstyle.html#naming_keywords, D style specification).
+    /// $(LINK2 https://dlang.org/dstyle.html#naming_keywords, D style specification). Alternatively,
+    /// `@JSONName("keyword")` can be used to pick a different name to use for the JSON key.
     ///
     /// For `getStruct`, the struct or class must have a default constructor available.
     ///
@@ -606,15 +607,34 @@ struct JSONParser {
 
                 static foreach (i, field; staticMap!(FieldNameTuple, FullT)) {{
 
+                    // Check if the field is accessible (private/JSONExclude)
                     enum compatible = __traits(compiles, mixin("T." ~ field))
                         && !hasUDA!(mixin("T." ~ field), JSONExclude);
 
+                    // Find the UDA name
+                    alias name = getUDAs!(mixin("T." ~ field), JSONName);
+
+                    static assert(name.length <= 1);
+
+                    // Pick field name based on UDA
+                    static if (name.length == 0)
+                        enum fieldName = field.chomp("_");
+                    else
+                        enum fieldName = name[0].originalName;
+
                     alias FieldType = FieldTypes[i];
+
+                    // Load the value
                     static if (compatible) {
 
-                        case field.chomp("_"):
+                        case fieldName:
 
-                            __traits(getMember, obj, field) = get!FieldType;
+                            // Skip null values
+                            if (peekType == Type.null_) skipValue();
+
+                            // Read the value
+                            else __traits(getMember, obj, field) = get!FieldType;
+
                             break fields;
 
                     }
@@ -680,6 +700,7 @@ struct JSONParser {
 
         struct Table {
 
+            @JSONName("table-name")
             string tableName;
 
             @JSONExclude
@@ -689,7 +710,7 @@ struct JSONParser {
 
         auto json = JSONParser(q{
             {
-                "tableName": "Player",
+                "table-name": "Player",
                 "id": "PRIMARY KEY INT",
                 "name": "VARCHAR(30)",
                 "xp": "INT",
@@ -729,7 +750,8 @@ struct JSONParser {
                 },
                 {
                     "name": "B",
-                    "ability": "doBar"
+                    "ability": "doBar",
+                    "health": null
                 },
                 {
                     "name": "C",
@@ -769,7 +791,6 @@ struct JSONParser {
 
                 // Inherit its values
                 parentState.updateStruct(entity);
-                // Note: We're operating on classes. Use `entity = state.getStruct(entity)` on structs
 
             }
 
@@ -1247,8 +1268,16 @@ unittest {
 
 }
 
-/// UDA used to exclude struct fields from serialization.
+/// UDA used to exclude struct fields from parsing.
 enum JSONExclude;
+
+/// UDA used to rename struct fields during parsing. The value in the attribute represents the name used in the JSON
+/// file.
+struct JSONName {
+
+    string originalName;
+
+}
 
 ///
 unittest {
