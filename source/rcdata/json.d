@@ -609,9 +609,11 @@ struct JSONParser {
 
     }
 
-    /// Push object contents into a struct or class.
+    /// Load given struct or class from JSON.
     ///
-    /// The object doesn't have to contain all fields defined in the struct or class.
+    /// If the object has a `fromJSON` method, it will be called to load the data. Otherwise, an attempt will be made to
+    /// read a JSON object and translate its properties to fields of the struct or class. The object doesn't have to
+    /// provide all fields defined in the struct or class.
     ///
     /// JSON fields that share names with D reserved keywords can be suffixed with `_` in code, per the
     /// $(LINK2 https://dlang.org/dstyle.html#naming_keywords, D style specification). Alternatively,
@@ -626,15 +628,23 @@ struct JSONParser {
     /// Params:
     ///     T = Type of the struct.
     ///     obj = Instance of the object to modify. Classes are edited in place, structs are not.
-    ///     fallback = Function to call if a field doesn't exist. Otherwise, it will be ignored.
+    ///     fallback = Function to call if a field doesn't exist. By default, such fields are ignored. The callback is
+    ///         not taken into account if the struct defines `fromJSON`.
     /// Returns:
     ///     1. If T is a struct, a copy of the given object with updated properties.
     ///     2. If T is a class, a reference to the given object. (ret is obj)
-    T updateStruct(T)(T obj, void delegate(ref T, wstring) fallback = null)
+    T updateStruct(T)(return scope T obj, void delegate(ref T, wstring) fallback = null)
     if (is(T == struct) || is(T == class)) {
 
+        /// If the object has a fromJSON property, use it instead.
+        static if (__traits(hasMember, obj, "fromJSON")) {
+
+            obj.fromJSON(this);
+
+        }
+
         // Expect an object
-        foreach (key; getObject) {
+        else foreach (key; getObject) {
 
             import std.string : chomp;
             import std.meta : AliasSeq, staticMap;
@@ -775,6 +785,28 @@ struct JSONParser {
         assert(table.attributes["id"] == "PRIMARY KEY INT");
         assert(table.attributes["xp"] == "INT");
         assert(table.attributes["attributes"] == "VARCHAR(60)");
+
+    }
+
+    /// Using `fromJSON`
+    unittest {
+
+        static struct Snowflake {
+
+            ulong id;
+
+            alias id this;
+
+            void fromJSON(JSONParser parser) {
+
+                id = parser.get!string.to!ulong;
+
+            }
+
+        }
+
+        auto json = JSONParser(`"1234567890"`);
+        assert(json.get!Snowflake == 1234567890);
 
     }
 
